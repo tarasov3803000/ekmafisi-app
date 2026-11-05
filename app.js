@@ -1,0 +1,723 @@
+/* Экмафиси — логика приложения (из пробной страницы). Грузится из sync.js, когда вход проверен и список текстов есть:
+   EK.lib — тексты, EK.uid — кто вошёл, EK.content(путь) — файл из закрытого хранилища (с кэшем), EK.queue* — отправка. */
+const LIB = EK.lib;
+LIB.forEach(m => m.phrases.forEach(p => { if (p.el === undefined) p.el = p.t; }));  /* английские материалы — поле t */
+const LEVELS = { A1: 1, A2: 2, B1: 3, B2: 4 };
+LIB.sort((a, b) => (LEVELS[a.level] || 9) - (LEVELS[b.level] || 9));
+const MODE_NAME = { skor: 'Скороговорка', bt: 'Обратный перевод' };
+const now = () => new Date().toISOString();
+const uuid = () => crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+
+/* --- хранение: сначала на устройстве, под id человека; всякое изменение — в очередь на отправку (sync.js) --- */
+const SKEY = 'ekmafisi.settings';
+const userKey = k => k.replace(/^ekmafisi\./, 'ekmafisi.' + EK.uid + '.');
+const read = k => { try { return JSON.parse(localStorage.getItem(userKey(k)) || 'null'); } catch (e) { return null; } };
+const write = (k, v) => { try { localStorage.setItem(userKey(k), JSON.stringify(v)); } catch (e) {} };
+let G = Object.assign({ rate: 1, input: 'voice', last: null, mode: 'skor', theme: 'auto' }, read(SKEY) || {});
+if (![0.8, 1, 1.5].includes(G.rate)) G.rate = G.rate < 1 ? 0.8 : 1;
+/* настройки на сервере — по ключу { v, t }: rate, input, mode, theme, last; pos.<текст> — где остановился; flags — «Неверно?» */
+const G_SYNC = ['rate', 'input', 'mode', 'theme', 'last'];
+const TKEY = 'ekmafisi.settings.t';
+function setSynced(key, v) {  /* отправить ключ, если значение изменилось с прошлой отправки */
+  const T = read(TKEY) || {};
+  /* ключ впервые на этом устройстве — значение «давнее»: сервер, если там новее, его заменит, а не наоборот */
+  if (!T[key]) { T[key] = { v, t: EPOCH }; write(TKEY, T); return; }
+  if (JSON.stringify(T[key].v) === JSON.stringify(v)) return;
+  T[key] = { v, t: now() }; write(TKEY, T); EK.queueSettings(key, v, T[key].t);
+}
+const EPOCH = '1970-01-01T00:00:00.000Z';
+G_SYNC.forEach(k => setSynced(k, G[k]));
+const saveG = () => { write(SKEY, G); G_SYNC.forEach(k => setSynced(k, G[k])); };
+const progOf = m => {  /* прогресс прежней нарезки (cut) к новым фразам не относится — начинаем заново */
+  const v = read('ekmafisi.' + m.id);
+  return Object.assign({ colors: {}, written: {}, ts: {}, log: [], skorAt: 0, btAt: 0, resetAt: '' }, v && (v.cut || 1) === (m.cut || 1) ? v : {});
+};
+const writeProg = (m, s) => write('ekmafisi.' + m.id, { cut: m.cut || 1, colors: s.colors, written: s.written, ts: s.ts, log: s.log, skorAt: s.skorAt, btAt: s.btAt, resetAt: s.resetAt });
+
+let M = null, P = [], CHUNKS = [], S = null;
+const save = () => { writeProg(M, S); setSynced('pos.' + M.id, { skorAt: S.skorAt, btAt: S.btAt }); };
+/* фраза изменилась (цвет или написанное) — строка «человек × текст × фраза» с временем изменения */
+function touch(m, s, pid) {
+  s.ts[pid] = now();
+  EK.queueProgress({ lang: m.lang || 'el', text_id: m.id, phrase_id: pid, cut: m.cut || 1, color: s.colors[pid] || null, written: s.written[pid] || null, updated_at: s.ts[pid] });
+}
+function logAdd(m, s, e) {  /* журнал: только добавление; id — чтобы два устройства не задвоили запись */
+  const id = uuid(), at = now();
+  s.log.push(Object.assign({ id, t: at.slice(0, 16) }, e));
+  EK.queueLog({ id, at, kind: 'mark', lang: m.lang || 'el', text_id: m.id, phrase_id: e.p, mode: e.m, color: e.c });
+}
+function mark(i, c, mode) {
+  S.colors[P[i].id] = c;
+  touch(M, S, P[i].id);
+  logAdd(M, S, { p: P[i].id, c, m: mode });
+  save();
+}
+
+/* --- звук: файл текста — из закрытого хранилища при первом открытии, дальше — из кэша устройства --- */
+const audio = new Audio(); audio.preload = 'auto';
+const blobs = {};
+let audioReady = Promise.resolve();
+function loadAudio(m) {
+  const show = on => $('loading').classList.toggle('hidden', !on);
+  if (blobs[m.id]) { audio.src = blobs[m.id]; show(false); return (audioReady = Promise.resolve()); }
+  show(true); $('loading').textContent = 'Загружаю звук…';
+  return (audioReady = EK.content(m.audio.file).then(r => r.blob())
+    .then(b => { blobs[m.id] = URL.createObjectURL(b); if (M === m) audio.src = blobs[m.id]; show(false); })
+    .catch(() => { $('loading').textContent = navigator.onLine ? 'Звук не загрузился. Откройте текст снова.' : 'Нет сети: звук этого текста ещё не загружался.'; }));
+}
+let stopAt = null, onEnd = null, raf = 0, seqToken = 0;
+/* «▶» — и пауза: owner — кнопка или строка, что сейчас звучит; повторное нажатие на неё ставит паузу, ещё одно — продолжает с того же места */
+let owner = null, paused = false, seqActive = false, heldNext = null;
+function paintOwner() {
+  document.querySelectorAll('[data-lbl]').forEach(b => {
+    const on = b === owner && (stopAt !== null || seqActive) && !paused;
+    b.textContent = on ? (b.dataset.lbl.length > 2 ? '⏸ Пауза' : '⏸') : b.dataset.lbl;
+  });
+}
+function tick() {
+  if (stopAt !== null && audio.currentTime >= stopAt) {
+    audio.pause(); stopAt = null; const f = onEnd; onEnd = null; f && f();
+    if (!seqActive && stopAt === null) owner = null;
+    paintOwner(); return;
+  }
+  if (stopAt !== null && !paused) raf = requestAnimationFrame(tick);
+}
+/* запасная остановка: rAF спит в фоне и на погасшем экране, timeupdate — нет; опоздание ≤ 0,25 с уходит в тишину после фразы */
+audio.addEventListener('timeupdate', () => { if (stopAt !== null && audio.currentTime >= stopAt) { cancelAnimationFrame(raf); tick(); } });
+function stop() {
+  seqToken++; cancelAnimationFrame(raf); audio.pause(); stopAt = null; onEnd = null;
+  owner = null; paused = false; seqActive = false; heldNext = null; paintOwner();
+  document.querySelectorAll('.playing').forEach(e => e.classList.remove('playing'));
+}
+function pause() { paused = true; cancelAnimationFrame(raf); audio.pause(); paintOwner(); }
+function resume() {
+  paused = false;
+  if (heldNext) { const f = heldNext; heldNext = null; f(); }
+  else if (stopAt !== null) { const pr = audio.play(); if (pr && pr.catch) pr.catch(() => {}); raf = requestAnimationFrame(tick); }
+  paintOwner();
+}
+/* нажатие на el: звучит el — пауза; на паузе — дальше; иначе — начать заново (start) */
+function toggle(el, start) {
+  if (owner === el && (stopAt !== null || seqActive)) { paused ? resume() : pause(); return; }
+  start();
+}
+function playBy(el, i, rate, done) { stop(); owner = el; playOne(i, rate, done); paintOwner(); }
+function playOne(i, rate, done) {
+  cancelAnimationFrame(raf); audio.pause(); paused = false;
+  if (!blobs[M.id]) { done && done(); return; }
+  audio.defaultPlaybackRate = rate; audio.playbackRate = rate;
+  audio.preservesPitch = true; audio.webkitPreservesPitch = true;
+  /* фразы лежат в файле подряд, каждая с затуханием и тишиной после: at — начало фразы в файле */
+  audio.currentTime = P[i].at;
+  stopAt = P[i].at + (P[i].end - P[i].start); onEnd = done || null;
+  const pr = audio.play();
+  if (pr && pr.catch) pr.catch(() => {});
+  raf = requestAnimationFrame(tick);
+}
+function playSeq(el, idx, rate, markFn) {
+  stop(); const tok = seqToken; let k = 0;
+  owner = el; seqActive = true;
+  const next = () => {
+    if (tok !== seqToken) return;
+    if (paused) { heldNext = next; return; }  /* пауза пришлась на промежуток между фразами */
+    document.querySelectorAll('.playing').forEach(e => e.classList.remove('playing'));
+    if (k >= idx.length) { seqActive = false; owner = null; paintOwner(); return; }
+    const i = idx[k++]; markFn && markFn(i);
+    playOne(i, rate, () => setTimeout(next, 450));
+  };
+  next(); paintOwner();
+}
+
+/* --- общее --- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const plural = (n, a, b, c) => (n % 10 === 1 && n % 100 !== 11) ? a : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? b : c;
+const fmt = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
+const RATE_LBL = r => r === 1 ? 'оригинал' : String(r).replace('.', ',') + '×';
+const dur = m => m.audio.clip_end - m.audio.clip_start;
+function counts(m, colors) {
+  const c = { g: 0, y: 0, r: 0 };
+  m.phrases.forEach(p => { const v = colors[p.id]; if (v) c[v]++; });
+  return c;
+}
+const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] / n * 100}%;background:var(--${k})"></span>`).join('');
+
+function show(id) {
+  stop();
+  ['shelf', 'home', 'skor', 'bt'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  window.scrollTo(0, 0);
+  if (id === 'shelf') renderShelf();
+  if (id === 'home') renderHome();
+}
+const shown = id => !$(id).classList.contains('hidden');
+
+/* --- переходы: каждый экран и окно — шаг в истории браузера, системное «назад» и «←» идут на шаг выше:
+   полка ← текст (#id) ← режим (#id-skor, #id-bt) ← окно слова (значения, происхождение, история) */
+const MODES = ['skor', 'bt'];
+const urlOf = h => h ? '#' + h : location.pathname + location.search;
+const depth = () => (history.state && history.state.d) || 0;
+const curHash = () => location.hash.slice(1);
+function push(hash, sheet) { history.pushState({ d: depth() + 1, sheet: sheet || null }, '', urlOf(hash)); }
+function goBack(fallback) {  /* открыто ссылкой прямо сюда — шага назад в странице нет: подменяем запись на экран выше */
+  if (depth() > 0) history.back();
+  else { history.replaceState({ d: 0, sheet: null }, '', urlOf(fallback)); applyLoc(); }
+}
+function parseHash(h) {
+  for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
+  return LIB.some(m => m.id === h) ? { v: 'home', id: h } : { v: 'shelf' };
+}
+function applyLoc(force) {  /* force — первый вход: экран рисуется, даже если уже виден */
+  const t = parseHash(curHash()), sh = history.state && history.state.sheet;
+  if (t.v === 'shelf') { if (force || !shown('shelf')) show('shelf'); }
+  else {
+    const fresh = !M || M.id !== t.id;
+    if (fresh) setText(t.id);
+    if (force || fresh || !shown(t.v)) t.v === 'home' ? show('home') : t.v === 'bt' ? btOpen(S.btAt) : skorOpen(S.skorAt);
+  }
+  sh ? openSheet(sh) : closeSheet();
+}
+window.addEventListener('popstate', () => applyLoc());
+document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goBack(b.dataset.go === 'home' ? M.id : ''));
+
+/* --- полка --- */
+function renderShelf() {
+  $('texts').innerHTML = LIB.map(m => {
+    const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
+    const done = c.g + c.y + c.r;
+    return `<button class="text${G.last === m.id ? ' last' : ''}" data-id="${m.id}">
+      <span class="top"><span class="chip">${esc(m.level)}</span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(m))}</span></span>
+      <span class="t">${esc(m.title)}</span>
+      <span class="tel">${esc(m.title_el)}</span>
+      <span class="meta2">${esc(m.source.author === 'Αλεξάνδρα' ? 'Александра' : m.source.author)}, «${esc(m.source.channel)}»${done ? ` · отмечено ${done} из ${n}, зелёных ${c.g}` : ''}</span>
+      <span class="tally" aria-hidden="true">${tallyHtml(c, n)}</span>
+    </button>`;
+  }).join('');
+  document.querySelectorAll('#texts .text').forEach(b => b.onclick = () => openText(b.dataset.id));
+  const last = LIB.find(m => m.id === G.last);
+  $('resume').classList.toggle('hidden', !last);
+  if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(last.title)}</small>`;
+}
+$('resume').onclick = () => { openText(G.last); start(G.mode); };
+
+function setText(id) {
+  const m = LIB.find(x => x.id === id);
+  M = m; P = m.phrases; CHUNKS = m.chunks; S = progOf(m);
+  G.last = m.id; saveG();
+  loadAudio(m); loadLex(m);
+}
+function openText(id) { setText(id); push(id); show('home'); }
+
+/* --- текст --- */
+function renderHome() {
+  const c = counts(M, S.colors), n = P.length;
+  $('hSrc').textContent = `${M.level} · ${M.source.author === 'Αλεξάνδρα' ? 'Александра' : M.source.author}, «${M.source.channel}»`;
+  $('hTitle').textContent = M.title; $('hTitleEl').textContent = M.title_el;
+  $('ytLink').href = M.source.url;
+  $('stat').textContent = `${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(M))} · зелёных ${c.g}, жёлтых ${c.y}, красных ${c.r}, без цвета ${n - c.g - c.y - c.r}`;
+  $('tally').innerHTML = tallyHtml(c, n);
+  $('run').textContent = 'Запустить · ' + MODE_NAME[G.mode];
+  $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="dot ${S.colors[p.id] || ''}"></span><span class="el">${esc(p.el)}</span><span class="ru">${esc(p.ru)}</span></button><button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
+  document.querySelectorAll('#list .ph').forEach(r => {
+    const i = +r.dataset.i;
+    r.querySelector('.ph-play').onclick = () => toggle(r, () => { playBy(r, i, G.rate, () => r.classList.remove('playing')); r.classList.add('playing'); });
+    r.querySelector('.ph-go').onclick = () => start(G.mode, i);  /* любая фраза, не по очереди; «Обратный перевод» — с куска, где она есть */
+  });
+}
+document.querySelectorAll('.mode').forEach(b => b.onclick = () => start(b.dataset.mode));
+$('run').onclick = () => start(G.mode);
+function start(mode, i) {  /* i — с какой фразы; без него — с того места, где остановились */
+  G.mode = mode; saveG(); push(M.id + '-' + mode);
+  if (mode === 'bt') btOpen(i === undefined ? S.btAt : Math.max(0, CHUNKS.findIndex(c => c.includes(i))));
+  else skorOpen(i === undefined ? S.skorAt : i);
+}
+
+$('copy').onclick = () => {
+  const lines = [`Экмафиси · ${new Date().toISOString().slice(0, 10)} · скорость скороговорки: ${RATE_LBL(G.rate)}`];
+  LIB.forEach(m => {
+    const pr = progOf(m); if (!pr.log.length) return;
+    lines.push('', `## ${m.id} — ${m.title}`);
+    m.phrases.forEach(p => {
+      const c = pr.colors[p.id], w = pr.written[p.id];
+      if (c || w) lines.push(`${p.id} ${c ? { g: 'зел', y: 'жёл', r: 'кр' }[c] : '—'}${w ? ' | написал: ' + w : ''}`);
+    });
+    lines.push('Журнал:'); pr.log.forEach(l => lines.push(`${l.t} ${l.p} ${l.m} ${l.c}`));
+  });
+  const flags = read('ekmafisi.etymflags') || {};
+  if (Object.keys(flags).length) { lines.push('', '## Происхождение — «Неверно?»'); Object.keys(flags).forEach(l => lines.push(`${flags[l].t} ${l}: ${flags[l].text}`)); }
+  if (lines.length === 1) lines.push('Пока ничего не отмечено.');
+  const txt = lines.join('\n');
+  const fallback = () => { $('copyWrap').classList.remove('hidden'); $('copyText').value = txt; $('copyText').select(); };
+  try { navigator.clipboard.writeText(txt).then(() => { $('copy').textContent = 'Скопировано'; setTimeout(() => $('copy').textContent = 'Скопировать итог', 2000); }, fallback); } catch (e) { fallback(); }
+};
+$('reset').onclick = () => $('resetWrap').classList.remove('hidden');
+$('resetNo').onclick = () => $('resetWrap').classList.add('hidden');
+$('resetYes').onclick = () => {
+  const ids = new Set([...Object.keys(S.colors), ...Object.keys(S.written)]);
+  const at = now(), id = uuid();
+  S = { colors: {}, written: {}, ts: S.ts, log: [], skorAt: 0, btAt: 0, resetAt: at };
+  ids.forEach(pid => touch(M, S, pid));
+  EK.queueLog({ id, at, kind: 'reset', lang: M.lang || 'el', text_id: M.id });
+  save();
+  $('resetWrap').classList.add('hidden'); renderHome();
+};
+
+/* --- подсказка по слову --- */
+const FL = { present: 'настоящее', imperfect: 'παρατατικός', aorist: 'аорист', future: 'будущее' };
+function wordsHtml(p) {  /* слова из words — в настоящем тексте фразы, со всей пунктуацией */
+  let h = '', at = 0;
+  p.words.forEach((w, k) => {
+    const pos = p.el.indexOf(w.t, at);
+    if (pos < 0) return;
+    h += esc(p.el.slice(at, pos)) + (w.l ? `<span class="w" data-k="${k}" data-l="${esc(w.l)}">${esc(w.t)}</span>` : esc(w.t));
+    at = pos + w.t.length;
+  });
+  return h + esc(p.el.slice(at));
+}
+/* пометка к слову в контексте без повтора перевода: часть «X — …», где X уже есть в переводе леммы, не показывается */
+function noteOf(w, L) {
+  if (!w.g) return '';
+  const ru = base(L.ru || '');
+  return w.g.split(/;\s*/).filter(s => { const head = s.split(' — ')[0]; return !(s.includes(' — ') && /\p{Script=Greek}/u.test(head) && ru.includes(base(head))); }).join('; ');
+}
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
+const formsOf = (L, D) => L.forms ? Object.keys(FL).map(k => (L.forms[k] || '—').replace(/ /g, '\u00a0')).join(' · ') : (D && D.dict.forms) || '';
+function glossHtml(w) {
+  const L = M.lexicon[w.l] || {}, D = LEX[w.l];
+  let h = `<div>${esc(cap(L.ru || (D && D.dict.senses[0] && D.dict.senses[0].ru) || ''))}</div>`;
+  const g = noteOf(w, L);
+  if (g) h += `<div class="small muted">${esc(cap(g))}</div>`;
+  /* формы строкой, без названий времён: у глагола всегда настоящее · παρατατικός · аорист · будущее */
+  const f = formsOf(L, D);
+  if (f) h += `<div class="el">${esc(f)}</div>` + (L.note ? `<div class="small muted">${esc(cap(L.note))}</div>` : '');
+  else if (base(w.t) !== base(w.l)) h += `<div class="el">${esc(w.l)}</div>`;
+  const a = [];
+  if (D && D.dict.senses.length) a.push(`<button class="link" data-senses="${esc(w.l)}">Значения</button>`);
+  if (D && D.etym) a.push(`<button class="link" data-etym="${esc(w.l)}">Происхождение</button>`);
+  if (a.length) h += `<div class="gl-links">${a.join('<span class="muted">·</span>')}</div>`;
+  return h;
+}
+/* нажатое слово подсвечено в предложении, пока открыта его карточка */
+function pickWord(scope, el) { scope.querySelectorAll('.w.sel').forEach(x => x.classList.remove('sel')); el.classList.add('sel'); }
+function sensesHtml(d) {
+  let h = '<ol class="senses">' + d.senses.map(s => `<li>${s.label ? `<i>${esc(s.label)}</i> ` : ''}${esc(s.ru)}${s.ex.map(x => `<span class="ex"><span class="el">${esc(x.el)}</span> — ${esc(x.ru)}</span>`).join('')}</li>`).join('') + '</ol>';
+  if (d.phrases.length) h += '<div class="phr"><span class="small muted">Выражения</span>' + d.phrases.map(x => `<div><span class="el">${esc(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
+  return h;
+}
+
+/* --- словарь и статьи о происхождении: свой файл у каждого текста (m.slovar), грузится при первом открытии текста --- */
+let LEX = {};
+const lexLoaded = {};
+function loadLex(m) {
+  if (!m.slovar || lexLoaded[m.id]) return;
+  lexLoaded[m.id] = true;
+  EK.content(m.slovar).then(r => r.json()).then(d => Object.assign(LEX, d || {})).catch(() => { lexLoaded[m.id] = false; });
+}
+const lexOf = l => { for (const m of LIB) if (m.lexicon[l]) return m.lexicon[l]; return null; };
+const phraseOf = l => { for (const m of [M, ...LIB].filter(Boolean)) for (const p of m.phrases) if (p.words.some(w => w.l === l)) return p; return null; };
+const EKEY = 'ekmafisi.etym', FKEY = 'ekmafisi.etymflags';
+let sheetNow = null;
+function openEtym(l) {
+  const log = read(EKEY) || [];
+  if (LEX[l]) { const id = uuid(), at = now(); log.push({ id, l, t: at.slice(0, 16) }); write(EKEY, log); EK.queueLog({ id, at, kind: 'etym', lang: (M && M.lang) || 'el', lemma: l }); }
+  push(curHash(), { k: 'etym', l }); openSheet(history.state.sheet);
+}
+function openSheet(sh) {
+  sheetNow = sh; $('etym').scrollTop = 0;
+  sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : renderEtym(sh.l);
+  $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
+}
+function closeSheet() { sheetNow = null; $('etym').classList.add('hidden'); document.body.style.overflow = ''; }
+$('eBack').onclick = () => goBack(curHash());
+$('eHist').onclick = () => { if (!sheetNow || sheetNow.k !== 'hist') { push(curHash(), { k: 'hist' }); openSheet(history.state.sheet); } };
+const elLink = s => { const cur = sheetNow && sheetNow.l; const k = Object.keys(LEX).find(l => base(l) === base(s) && l !== cur); return k ? `<button class="link el" data-etym="${esc(k)}">${esc(s)}</button>` : `<span class="el">${esc(s)}</span>`; };
+const sec = (t, body) => body ? `<section class="e-sec"><h2>${t}</h2>${body}</section>` : '';
+function headHtml(l, D) {
+  const L = lexOf(l) || {}, p = phraseOf(l), forms = formsOf(L, D);
+  return `<div class="e-head"><span class="lem">${esc(l)}</span><span>${esc(cap(L.ru || D.dict.senses[0]?.ru || ''))}</span>
+      ${forms ? `<span class="el muted">${esc(forms)}</span>` : ''}
+      ${p ? `<span class="small muted"><span class="el">${esc(p.el)}</span></span>` : ''}</div>`;
+}
+function renderSenses(l) {
+  const D = LEX[l];
+  $('eTtl').textContent = 'Значения';
+  if (!D) { $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статьи пока нет.</p>`; return; }
+  $('eBody').innerHTML = headHtml(l, D) + sensesHtml(D.dict) + `<div class="e-foot"><span>Значения написаны ИИ (Claude) по Викисловарю (CC BY-SA); человеком — не проверено.</span></div>`;
+}
+function renderEtym(l) {
+  const D = LEX[l];
+  $('eTtl').textContent = 'Происхождение';
+  if (!D) { $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статьи пока нет: в пробе — 50 слов «Ёлки» и βάζω.</p>`; return; }
+  const e = D.etym;
+  const END = { unknown: 'Дальше происхождение неизвестно.', reconstruction_only: 'Дальше — только реконструкции; их не приводим.' };
+  $('eBody').innerHTML = headHtml(l, D) + `
+    ${sec('Состав', e.parts && `<p>${esc(e.parts)}</p>`)}
+    ${sec('Происхождение', (e.chain.length ? '<ul class="chain">' + e.chain.map(c => `<li><span class="st">${esc(c.stage)}</span><span>${elLink(c.form)} — ${esc(c.meaning)}</span></li>`).join('') + '</ul>' : '')
+      + (END[e.chain_end] ? `<p class="muted small">${END[e.chain_end]}</p>` : '') + (e.shift ? `<p>${esc(e.shift)}</p>` : ''))}
+    ${sec('Семья в греческом', e.family.length && '<ul>' + e.family.map(f => `<li>${elLink(f.el)} — ${esc(f.ru)}</li>`).join('') + '</ul>')}
+    ${sec('В русском и европейских', e.loans.length && '<ul>' + e.loans.map(x => `<li><b>${esc(x.word)}</b> <span class="muted small">${esc(x.lang)}</span>${x.via ? ` ← <span class="el">${esc(x.via)}</span>` : ''}</li>`).join('') + '</ul>')}
+    ${sec('В церковном языке', e.church && `<p>${esc(e.church)}</p>`)}
+    ${sec('Зацепка', e.hook && `<p>${esc(e.hook)}</p>`)}
+    <div class="e-foot"><span>Достоверность: ${esc(D.confidence)}. Написано ИИ (Claude) по источникам и проверено кодом; человеком — не проверено.</span>
+      <span>Источники: ${D.sources.map(esc).join('; ')}. По материалам Викисловаря (CC BY-SA).</span></div>
+    <div class="e-sec"><button class="link" id="eFlag" style="justify-self:start">Неверно?</button>
+      <div id="eFlagBox" class="hidden" style="display:grid;gap:8px"><textarea id="eFlagText" placeholder="Что не так — коротко"></textarea><button class="btn" id="eFlagSave">Сохранить</button></div></div>`;
+  const flags = read(FKEY) || {};
+  if (flags[l]) { $('eFlagText').value = flags[l].text; $('eFlag').textContent = 'Отмечено: неверно — изменить'; }
+  $('eFlag').onclick = () => $('eFlagBox').classList.remove('hidden');
+  $('eFlagSave').onclick = () => {
+    const f = read(FKEY) || {}, t = $('eFlagText').value.trim();
+    if (t) f[l] = { text: t, t: new Date().toISOString().slice(0, 16) }; else delete f[l];
+    write(FKEY, f); setSynced('flags', f); $('eFlagBox').classList.add('hidden'); $('eFlag').textContent = t ? 'Отмечено: неверно — изменить' : 'Неверно?';
+  };
+}
+function renderHist() {
+  $('eTtl').textContent = 'История';
+  const log = read(EKEY) || [], seen = {};
+  log.forEach(x => { seen[x.l] = seen[x.l] || { n: 0, t: '' }; seen[x.l].n++; seen[x.l].t = x.t; });
+  const items = Object.keys(seen).sort((a, b) => seen[b].t.localeCompare(seen[a].t));
+  $('eBody').innerHTML = `<div class="hist" style="display:grid;gap:8px"><input id="hQ" type="search" placeholder="Поиск" autocomplete="off"><div id="hList"></div></div>`;
+  const draw = q => {
+    const qq = base(q || '');
+    const rows = items.filter(l => !qq || base(l).includes(qq) || base((lexOf(l) || {}).ru || '').includes(qq));
+    $('hList').innerHTML = rows.length ? rows.map(l => `<button data-etym="${esc(l)}"><span><span class="el">${esc(l)}</span> <span class="muted small">${esc((lexOf(l) || {}).ru || '')}</span></span><span class="small muted">${esc(LEX[l]?.etym.gist || '')} · ${seen[l].n} ${plural(seen[l].n, 'раз', 'раза', 'раз')}</span></button>`).join('')
+      : `<p class="muted small">${items.length ? 'Ничего не найдено.' : 'Пока пусто: откройте статью долгим нажатием на слово.'}</p>`;
+  };
+  $('hQ').oninput = e => draw(e.target.value); draw('');
+}
+/* нажатия внутри карточки и окон — одним слушателем: «Значения» и data-etym открывают своё окно */
+document.addEventListener('click', e => {
+  const s = e.target.closest('[data-senses]');
+  if (s) { push(curHash(), { k: 'senses', l: s.dataset.senses }); openSheet(history.state.sheet); return; }
+  const a = e.target.closest('[data-etym]');
+  if (a) { e.stopPropagation(); openEtym(a.dataset.etym); }
+});
+/* долгое нажатие на слово (≈ 450 мс) — сразу статья; обычное — карточка, как прежде */
+let lp = null;
+document.addEventListener('pointerdown', e => {
+  const w = e.target.closest('.w'); if (!w || e.button > 0) return;
+  w.classList.add('hold');
+  lp = { w, x: e.clientX, y: e.clientY, fired: false, t: setTimeout(() => { lp.fired = true; w.classList.remove('hold'); openEtym(w.dataset.l); }, 450) };
+});
+const lpCancel = () => {  /* после сработавшего долгого нажатия глотаем только ближайший click: на телефоне его может и не быть */
+  if (!lp) return; clearTimeout(lp.t); lp.w.classList.remove('hold');
+  if (!lp.fired) lp = null; else { const cur = lp; setTimeout(() => { if (lp === cur) lp = null; }, 400); }
+};
+document.addEventListener('pointermove', e => { if (lp && !lp.fired && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) lpCancel(); });
+document.addEventListener('pointerup', lpCancel);
+document.addEventListener('pointercancel', lpCancel);
+document.addEventListener('click', e => { if (lp && lp.fired) { e.stopPropagation(); e.preventDefault(); lp = null; } }, true);
+document.addEventListener('contextmenu', e => { if (e.target.closest('.w')) e.preventDefault(); });
+
+/* --- Скороговорка --- */
+const STEPS = [
+  { lbl: '0,8×', rate: 0.8, hint: 'Говорите вместе с Александрой' },
+  { lbl: 'оригинал', rate: 1, hint: 'Вместе, в темпе оригинала' },
+  { lbl: 'по памяти', rate: 1, hint: 'Текст скрыт. Скажите по памяти, потом сверьтесь со звуком' },
+  { lbl: 'быстро', rate: 1.15, hint: 'Скороговоркой, быстрее оригинала — три раза подряд без запинки' }
+];
+/* выбрано 1,5× — ступень «вместе» идёт в 1,5×, сверка по памяти и «быстро» — не медленнее её */
+const stepRate = k => k === 0 ? 0.8 : k === 3 ? Math.max(STEPS[3].rate, G.rate) : Math.max(1, G.rate);
+const stepLbl = k => k === 1 && G.rate > 1 ? RATE_LBL(G.rate) : STEPS[k].lbl;
+let sk = { i: 0, step: 0, reps: 0, first: 0 };
+function skorOpen(i) {
+  show('skor');
+  sk = { i: i % P.length, first: G.rate < 1 ? 0 : 1 };  /* скорость — последняя выбранная на фразе (0,6× прежней версии → 0,8×) */
+  sk.step = sk.first; sk.reps = 0;
+  skorRender();
+}
+function skorRender() {
+  const p = P[sk.i], st = STEPS[sk.step];
+  $('sCnt').textContent = `${sk.i + 1} / ${P.length}`;
+  $('ladder').innerHTML = STEPS.map((s, k) => `<div class="${k < sk.first ? 'skip' : k < sk.step ? 'done' : k === sk.step ? 'now' : ''}">${stepLbl(k)}</div>`).join('');
+  $('sText').innerHTML = wordsHtml(p);
+  const hide = sk.step >= 2;
+  $('sText').classList.toggle('hidden', hide);
+  $('sVeil').classList.toggle('hidden', !hide);
+  $('sPeek').classList.toggle('hidden', !hide);
+  $('sRu').textContent = p.ru;
+  $('sGloss').classList.add('hidden');
+  $('sHint').textContent = (sk.step === 1 && G.rate > 1 ? 'Вместе, в полтора раза быстрее оригинала' : st.hint).replace('Александрой', M.source.author === 'Αλεξάνδρα' ? 'Александрой' : 'автором');
+  const fast = sk.step === 3;
+  $('sSpeed').classList.toggle('hidden', sk.step > 1);
+  paintSpeed();
+  $('sCtl').classList.toggle('hidden', fast);
+  $('sFast').classList.toggle('hidden', !fast);
+  $('sReps').classList.toggle('hidden', !fast);
+  $('sRate').classList.add('hidden');
+  [...$('sReps').children].forEach((e, k) => e.classList.toggle('on', k < sk.reps));
+  document.querySelectorAll('#sText .w').forEach(e => e.onclick = () => {
+    const g = $('sGloss'); g.innerHTML = glossHtml(p.words[+e.dataset.k]); g.classList.remove('hidden'); pickWord($('sText'), e);
+  });
+  /* звук — только по «▶»: автозапуска нет (Ваше слово, 5 ноября 2026) */
+}
+['sPlay', 'sPlay2'].forEach(id => $(id).onclick = () => toggle($(id), () => playBy($(id), sk.i, stepRate(sk.step))));
+/* скорость одна на всё прослушивание и запоминается: 0,8× — ступень «вместе медленно», оригинал и 1,5× — сразу в темпе */
+function paintSpeed() { document.querySelectorAll('.speed button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.r === G.rate))); }
+document.querySelectorAll('.speed button').forEach(b => b.onclick = () => {
+  G.rate = +b.dataset.r; saveG(); paintSpeed();
+  if (b.parentNode.id === 'sSpeed') { sk.first = sk.step = G.rate < 1 ? 0 : 1; sk.reps = 0; skorRender(); if (owner) audio.playbackRate = audio.defaultPlaybackRate = stepRate(sk.step); }
+  else if (owner) audio.playbackRate = audio.defaultPlaybackRate = G.rate;  /* звучащее ускоряется на ходу */  /* в списке и «Обратном переводе» звучащее ускоряется на ходу */
+});
+paintSpeed();
+$('sPeek').onclick = () => { $('sText').classList.remove('hidden'); $('sVeil').classList.add('hidden'); };
+$('sNext').onclick = () => { sk.step++; sk.reps = 0; skorRender(); };
+$('sSlip').onclick = () => { sk.reps = 0; skorRender(false); };
+$('sClean').onclick = () => {
+  sk.reps++; skorRender(false);
+  if (sk.reps >= 3) { $('sFast').classList.add('hidden'); $('sRate').classList.remove('hidden'); $('sText').classList.remove('hidden'); $('sVeil').classList.add('hidden'); $('sHint').textContent = 'Натренирована.'; }
+};
+document.querySelectorAll('#sColors button').forEach(b => b.onclick = () => {
+  mark(sk.i, b.dataset.c, 'skor');
+  S.skorAt = (sk.i + 1) % P.length; save();
+  sk.i = S.skorAt; sk.step = sk.first; sk.reps = 0; skorRender();
+});
+
+/* --- Обратный перевод --- */
+let bc = 0, bColors = {};
+function btOpen(c) {
+  show('bt'); bc = c % CHUNKS.length; bColors = {};
+  $('bCnt').textContent = `кусок ${bc + 1} / ${CHUNKS.length}`;
+  ['b1', 'b2', 'b3'].forEach((x, k) => $(x).classList.toggle('hidden', k !== 0));
+  $('b1Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line" data-i="${i}"><span class="el">${wordsHtml(P[i])}</span><span class="ru-line small">${esc(P[i].ru)}</span><div class="gloss hidden"></div></div>`).join('');
+  document.querySelectorAll('#b1Lines .line').forEach(l => {
+    const i = +l.dataset.i;
+    l.querySelector('.el').onclick = ev => {
+      const w = ev.target.closest('.w');
+      if (w) { const g = l.querySelector('.gloss'); g.innerHTML = glossHtml(P[i].words[+w.dataset.k]); g.classList.remove('hidden'); pickWord($('b1Lines'), w); return; }
+      toggle(l, () => { playBy(l, i, G.rate, () => l.classList.remove('playing')); l.classList.add('playing'); });
+    };
+  });
+  window.scrollTo(0, 0);
+}
+$('b1Play').onclick = () => toggle($('b1Play'), () => playSeq($('b1Play'), CHUNKS[bc], G.rate, i => { const l = document.querySelector(`#b1Lines .line[data-i="${i}"]`); l && l.classList.add('playing'); }));
+$('b1Next').onclick = () => { stop(); $('b1').classList.add('hidden'); $('b2').classList.remove('hidden'); renderB2(); window.scrollTo(0, 0); };
+function renderB2() {
+  document.querySelectorAll('#inMode button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.i === G.input)));
+  const text = G.input === 'text';
+  $('b2Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line"><span>${esc(P[i].ru)}</span>${text ? `<textarea id="in-${i}" lang="el" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(P[i].ru)}"></textarea>` : ''}</div>`).join('');
+  $('b2Next').textContent = text ? 'Сверить' : 'Сказал(а) — сверить';
+}
+document.querySelectorAll('#inMode button').forEach(b => b.onclick = () => {
+  const keep = {}; document.querySelectorAll('#b2Lines textarea').forEach(t => keep[t.id] = t.value);
+  G.input = b.dataset.i; saveG(); renderB2();
+  Object.keys(keep).forEach(id => { const t = $(id); if (t) t.value = keep[id]; });
+});
+$('b2Next').onclick = () => {
+  const answers = {};
+  CHUNKS[bc].forEach(i => { const t = $('in-' + i); if (t && t.value.trim()) { answers[i] = t.value.trim(); S.written[P[i].id] = answers[i]; touch(M, S, P[i].id); } });
+  save();
+  $('b2').classList.add('hidden'); $('b3').classList.remove('hidden'); renderB3(answers); window.scrollTo(0, 0);
+};
+
+/* сверка написанного: слова сводятся с оригиналом (одинаковые — и похожие, если совпадает хотя бы половина букв),
+   в похожих выделяются только ошибочные буквы; ударение — отдельной пометкой, регистр не в счёт */
+const tok = s => s.match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) || [];
+const base = w => w.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/ς/g, 'σ');  /* без ударений и регистра — для карточки слова и статьи */
+const gl =w => w.normalize('NFD').match(/\P{M}\p{M}*/gu) || [];  /* буква со своими знаками */
+const gb = g => g[0].toLowerCase().replace(/ς/g, 'σ');
+const gm = g => g.slice(1).split('').sort().join('');
+function lev(A, B) {  /* таблица расстояний правки по буквам (без знаков) */
+  const D = Array.from({ length: A.length + 1 }, (_, i) => [i, ...new Array(B.length).fill(0)]);
+  for (let j = 1; j <= B.length; j++) D[0][j] = j;
+  for (let i = 1; i <= A.length; i++) for (let j = 1; j <= B.length; j++)
+    D[i][j] = Math.min(D[i - 1][j] + 1, D[i][j - 1] + 1, D[i - 1][j - 1] + (A[i - 1] === B[j - 1] ? 0 : 1));
+  return D;
+}
+function charDiff(u, o) {  /* слово человека и верное → разметка букв в обоих */
+  const a = gl(u), b = gl(o), A = a.map(gb), B = b.map(gb), D = lev(A, B);
+  const ca = new Array(a.length).fill(''), cb = new Array(b.length).fill('');
+  let i = a.length, j = b.length;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && D[i][j] === D[i - 1][j - 1] + (A[i - 1] === B[j - 1] ? 0 : 1)) {
+      if (A[i - 1] !== B[j - 1]) ca[i - 1] = cb[j - 1] = 'cx';
+      else if (gm(a[i - 1]) !== gm(b[j - 1])) ca[i - 1] = cb[j - 1] = 'ca';
+      i--; j--;
+    } else if (i > 0 && D[i][j] === D[i - 1][j] + 1) ca[--i] = 'cx';
+    else cb[--j] = 'cx';
+  }
+  const html = (g, c) => g.map((x, k) => c[k] ? `<span class="${c[k]}">${esc(x.normalize('NFC'))}</span>` : esc(x.normalize('NFC'))).join('');
+  return [html(a, ca), html(b, cb)];
+}
+function sim(u, o) {  /* 2 — то же слово (без ударений), иначе доля совпавших букв, если не меньше половины */
+  const A = gl(u).map(gb), B = gl(o).map(gb);
+  if (A.join('') === B.join('')) return 2;
+  const v = 1 - lev(A, B)[A.length][B.length] / Math.max(A.length, B.length);
+  return v >= .5 ? v : -1;
+}
+function diff(user, orig) {
+  const a = tok(user), b = tok(orig), n = a.length, m = b.length;
+  const S = Array.from({ length: n }, (_, i) => b.map(w => sim(a[i], w)));
+  const T = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    T[i][j] = Math.max(T[i + 1][j], T[i][j + 1], S[i][j] > 0 ? T[i + 1][j + 1] + S[i][j] : -1);
+  const U = a.map(w => `<span class="bad">${esc(w)}</span>`), O = b.map(w => `<span class="miss">${esc(w)}</span>`);
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (S[i][j] > 0 && T[i][j] === T[i + 1][j + 1] + S[i][j]) { [U[i], O[j]] = charDiff(a[i], b[j]); i++; j++; }
+    else if (T[i][j] === T[i + 1][j]) i++;
+    else j++;
+  }
+  return { u: U.join(' '), o: O.join(' ') };
+}
+function renderB3(answers) {
+  $('b3Lines').innerHTML = CHUNKS[bc].map(i => {
+    const p = P[i], a = answers[i];
+    const d = a ? diff(a, p.el) : null;
+    return `<div class="cmp" data-i="${i}">
+      <span class="small muted">${esc(p.ru)}</span>
+      ${a ? `<span class="el you">${d.u}</span>` : ''}
+      <span class="el">${d ? d.o : esc(p.el)}</span>
+      <div class="colors sm"><button class="g" data-c="g" aria-pressed="false">Знаю</button><button class="y" data-c="y" aria-pressed="false">Повторить</button><button class="r" data-c="r" aria-pressed="false">Трудно</button></div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('#b3Lines .cmp').forEach(row => {
+    const i = +row.dataset.i;
+    row.querySelectorAll('.colors button').forEach(b => b.onclick = () => {
+      bColors[i] = b.dataset.c;
+      row.querySelectorAll('.colors button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      updB3();
+    });
+  });
+  updB3();
+}
+function updB3() {
+  const left = CHUNKS[bc].filter(i => !bColors[i]).length;
+  $('b3Next').disabled = left > 0;
+  $('b3Next').textContent = left ? `Поставьте цвет: осталось ${left}` : (bc + 1 < CHUNKS.length ? 'Следующий кусок' : 'Готово — к тексту');
+}
+$('b3Next').onclick = () => {
+  CHUNKS[bc].forEach(i => mark(i, bColors[i], 'bt' + (G.input === 'text' ? '-письмо' : '-голос')));
+  const last = bc + 1 >= CHUNKS.length;
+  S.btAt = (bc + 1) % CHUNKS.length; save();
+  last ? goBack(M.id) : btOpen(S.btAt);
+};
+
+/* --- тема: авто (как в системе) · светлая · тёмная --- */
+const THEMES = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
+function paintTheme() {
+  if (G.theme === 'auto' || !THEMES[G.theme]) document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = G.theme;
+  $('theme').textContent = 'Тема: ' + (THEMES[G.theme] || THEMES.auto);
+}
+$('theme').onclick = () => { const k = Object.keys(THEMES); G.theme = k[(k.indexOf(G.theme) + 1) % k.length]; saveG(); paintTheme(); };
+paintTheme();
+
+/* --- подтянутое с сервера: по фразе — позднее изменение; журнал — по id; настройки — по ключу --- */
+EK.onRemote = ({ progress, log, settings }) => {
+  const byId = Object.fromEntries(LIB.map(m => [m.id, m]));
+  const touched = {};
+  const progFor = id => touched[id] || (touched[id] = byId[id] === M ? S : progOf(byId[id]));
+  progress.forEach(r => {
+    const m = byId[r.text_id]; if (!m || (r.cut || 1) !== (m.cut || 1)) return;
+    const s = progFor(r.text_id);
+    if (s.ts[r.phrase_id] && s.ts[r.phrase_id] >= r.updated_at) return;
+    s.ts[r.phrase_id] = r.updated_at;
+    if (r.color) s.colors[r.phrase_id] = r.color; else delete s.colors[r.phrase_id];
+    if (r.written) s.written[r.phrase_id] = r.written; else delete s.written[r.phrase_id];
+  });
+  const elog = read(EKEY) || [], eseen = new Set(elog.map(x => x.id).filter(Boolean));
+  let eadd = false;
+  log.forEach(r => {
+    if (r.kind === 'etym') { if (!eseen.has(r.id)) { elog.push({ id: r.id, l: r.lemma, t: r.at.slice(0, 16) }); eadd = true; } return; }
+    const m = byId[r.text_id]; if (!m) return;
+    const s = progFor(r.text_id);
+    if (r.kind === 'reset') {  /* сброс на другом устройстве: всё, что раньше него, — вон */
+      if (!s.resetAt || s.resetAt < r.at) {
+        s.resetAt = r.at; s.log = s.log.filter(x => (x.t || '') >= r.at.slice(0, 16));
+        Object.keys(s.ts).forEach(pid => { if (s.ts[pid] < r.at) { delete s.colors[pid]; delete s.written[pid]; } });
+      }
+      return;
+    }
+    if (r.kind !== 'mark' || (s.resetAt && r.at < s.resetAt) || s.log.some(x => x.id === r.id)) return;
+    s.log.push({ id: r.id, p: r.phrase_id, c: r.color, m: r.mode, t: r.at.slice(0, 16) });
+  });
+  if (eadd) { elog.sort((a, b) => a.t.localeCompare(b.t)); write(EKEY, elog); }
+  const T = read(TKEY) || {};
+  Object.keys(settings).forEach(k => {
+    const r = settings[k]; if (!r || (T[k] && T[k].t >= r.t)) return;
+    T[k] = r;
+    if (G_SYNC.includes(k)) G[k] = r.v;
+    else if (k === 'flags') write(FKEY, r.v || {});
+    else if (k.startsWith('pos.') && byId[k.slice(4)]) Object.assign(progFor(k.slice(4)), r.v || {});
+  });
+  write(TKEY, T); write(SKEY, G);
+  Object.keys(touched).forEach(id => { touched[id].log.sort((a, b) => a.t.localeCompare(b.t)); writeProg(byId[id], touched[id]); });
+  /* перерисовать то, что видно и не мешает занятию: полку и экран текста */
+  paintTheme(); paintSpeed();
+  if (!impAsked && anyProgress()) $('imp').classList.add('hidden');  /* прогресс пришёл с другого устройства — переносить уже не нужно */
+  if (shown('shelf')) renderShelf();
+  else if (shown('home')) renderHome();
+};
+
+/* --- перенос с пробной страницы: её прогресс живёт только у неё (другой адрес), поэтому — через «Скопировать итог» --- */
+function importPilot(txt) {
+  const byId = Object.fromEntries(LIB.map(m => [m.id, m]));
+  const CL = { 'зел': 'g', 'жёл': 'y', 'кр': 'r' };
+  let m = null, inLog = false, nC = 0, nL = 0;
+  const data = {};
+  txt.split(/\r?\n/).forEach(line => {
+    const h = line.match(/^## (\S+) — /);
+    if (h) { m = byId[h[1]] || null; inLog = false; if (m) data[m.id] = data[m.id] || { rows: {}, log: [] }; return; }
+    if (line.startsWith('## ')) { m = null; return; }
+    if (!m) return;
+    if (line.trim() === 'Журнал:') { inLog = true; return; }
+    if (inLog) {
+      const l = line.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d) (\S+) (\S+) ([gyr])$/);
+      if (l) data[m.id].log.push({ t: l[1], p: l[2], m: l[3], c: l[4] });
+      return;
+    }
+    const r = line.match(/^(\S+) (зел|жёл|кр|—)(?: \| написал: (.*))?$/);
+    if (r && m.phrases.some(p => p.id === r[1])) data[m.id].rows[r[1]] = { c: CL[r[2]] || null, w: r[3] || null };
+  });
+  Object.keys(data).forEach(id => {
+    const mm = byId[id], s = id === (M && M.id) ? S : progOf(mm), d = data[id];
+    const lastT = {}; d.log.forEach(l => { lastT[l.p] = l.t; });
+    Object.keys(d.rows).forEach(pid => {
+      const at = lastT[pid] ? lastT[pid] + ':00.000Z' : now();  /* время — по журналу пробной страницы: позднее изменение здесь важнее */
+      if (s.ts[pid] && s.ts[pid] >= at) return;
+      const r = d.rows[pid];
+      if (r.c) s.colors[pid] = r.c; if (r.w) s.written[pid] = r.w;
+      s.ts[pid] = at; nC++;
+      EK.queueProgress({ lang: mm.lang || 'el', text_id: id, phrase_id: pid, cut: mm.cut || 1, color: s.colors[pid] || null, written: s.written[pid] || null, updated_at: at });
+    });
+    const have = new Set(s.log.map(l => l.t + l.p + l.m + l.c));
+    d.log.forEach(l => {
+      if (have.has(l.t + l.p + l.m + l.c)) return;
+      const lid = uuid(); s.log.push(Object.assign({ id: lid }, l)); nL++;
+      EK.queueLog({ id: lid, at: l.t + ':00.000Z', kind: 'mark', lang: mm.lang || 'el', text_id: id, phrase_id: l.p, mode: l.m, color: l.c });
+    });
+    s.log.sort((a, b) => a.t.localeCompare(b.t));
+    writeProg(mm, s);
+  });
+  return { texts: Object.keys(data).length, nC, nL };
+}
+const IMPKEY = 'ekmafisi.imported';
+const anyProgress = () => LIB.some(m => { const s = progOf(m); return s.log.length || Object.keys(s.colors).length; });
+let impAsked = false;
+$('impOpen').onclick = () => { impAsked = true; $('imp').classList.remove('hidden'); $('impMsg').textContent = ''; $('imp').scrollIntoView({ block: 'start' }); };
+$('impNo').onclick = () => { write(IMPKEY, true); $('imp').classList.add('hidden'); };
+$('impGo').onclick = () => {
+  const r = importPilot($('impText').value);
+  if (!r.texts) { $('impMsg').textContent = 'Не нашёл в тексте прогресса. Нужен весь итог целиком, вместе со строками «## …».'; return; }
+  write(IMPKEY, true); $('impText').value = '';
+  $('impMsg').textContent = `Перенесено: фраз с цветом или записью — ${r.nC}, записей журнала — ${r.nL}.`;
+  renderShelf();
+};
+
+/* --- кто вошёл и состояние отправки --- */
+const SYNC_LBL = { synced: () => 'сохранено на сервере', pending: () => 'ждёт отправки', offline: () => 'без сети — хранится здесь', error: () => 'не отправилось — повторю' };
+EK.onStatus = st => { $('acctSync').textContent = SYNC_LBL[st] ? '· ' + SYNC_LBL[st]() : ''; };
+$('acctWho').textContent = EK.email || '';
+$('signOut').onclick = () => EK.signOut();
+EK.onStatus(EK.status || (navigator.onLine ? '' : 'offline'));
+/* первый вход: прогресса нет, перенос ещё не предлагался — показать сразу */
+if (!EK.DEV && !anyProgress() && !read(IMPKEY)) $('imp').classList.remove('hidden');
+
+/* --- вход: ссылка прямо на текст или режим (#id, #id-skor) — достраиваем шаги назад: полка ← текст ← режим --- */
+if (!history.state || history.state.d === undefined) {
+  const t = parseHash(curHash());
+  history.replaceState({ d: 0, sheet: null }, '', urlOf(''));
+  if (t.v !== 'shelf') push(t.id);
+  if (MODES.includes(t.v)) push(t.id + '-' + t.v);
+}
+applyLoc(true);
+EK.sync();  /* подтянуть с сервера то, что изменилось на других устройствах */
