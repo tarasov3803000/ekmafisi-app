@@ -26,7 +26,10 @@ const write = (k, v) => { try { localStorage.setItem(userKey(k), JSON.stringify(
 let G = Object.assign({ rate: 1, input: 'voice', last: null, mode: 'skor', theme: 'auto' }, read(SKEY) || {});
 if (![0.8, 1, 1.5].includes(G.rate)) G.rate = G.rate < 1 ? 0.8 : 1;
 /* настройки на сервере — по ключу { v, t }: rate, input, mode, theme, last; pos.<текст> — где остановился; flags — «Неверно?» */
-const G_SYNC = ['rate', 'input', 'mode', 'theme', 'last'];
+/* язык обучения — lang; «Продолжить» — свой у каждого языка: last.el, last.en */
+const G_SYNC = ['rate', 'input', 'mode', 'theme', 'lang', ...Object.keys(LANGS).map(l => 'last.' + l)];
+if (G.last) { const m0 = LIB.find(m => m.id === G.last); if (m0 && !G['last.' + m0.lang]) G['last.' + m0.lang] = G.last; delete G.last; }  /* прежний общий last */
+const lastId = () => G.lang && G['last.' + G.lang];
 const TKEY = 'ekmafisi.settings.t';
 function setSynced(key, v) {  /* отправить ключ, если значение изменилось с прошлой отправки */
   const T = read(TKEY) || {};
@@ -156,7 +159,7 @@ function show(id) {
   stop();
   ['shelf', 'home', 'skor', 'bt'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0);
-  if (id === 'shelf') renderShelf();
+  if (id === 'shelf') { if (window.EK_UPDATE) return location.reload(); renderShelf(); }
   if (id === 'home') renderHome();
 }
 const shown = id => !$(id).classList.contains('hidden');
@@ -191,10 +194,14 @@ document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goBack(b.d
 
 /* --- полка --- */
 function renderShelf() {
-  $('texts').innerHTML = LIB.map(m => {
+  /* язык не выбран — сначала выбор; выбран — на полке только его тексты */
+  $('langPick').classList.toggle('hidden', !!G.lang);
+  $('shelfList').classList.toggle('hidden', !G.lang);
+  $('langBtn').textContent = 'Учу: ' + (G.lang ? LANGS[G.lang].name : '—');
+  $('texts').innerHTML = LIB.filter(m => m.lang === G.lang).map(m => {
     const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
     const done = c.g + c.y + c.r;
-    return `<button class="text${G.last === m.id ? ' last' : ''}" data-id="${m.id}">
+    return `<button class="text${lastId() === m.id ? ' last' : ''}" data-id="${m.id}">
       <span class="top"><span class="row" style="gap:6px"><span class="chip lang" title="${esc(LG(m).name)}">${esc(LG(m).chip)}</span><span class="chip">${esc(m.level)}</span></span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(m))}</span></span>
       <span class="t">${esc(m.title)}</span>
       <span class="tel">${esc(TTL(m))}</span>
@@ -203,16 +210,18 @@ function renderShelf() {
     </button>`;
   }).join('');
   document.querySelectorAll('#texts .text').forEach(b => b.onclick = () => openText(b.dataset.id));
-  const last = LIB.find(m => m.id === G.last);
+  const last = LIB.find(m => m.id === lastId());
   $('resume').classList.toggle('hidden', !last);
   if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(last.title)}</small>`;
 }
-$('resume').onclick = () => { openText(G.last); start(G.mode); };
+$('resume').onclick = () => { openText(lastId()); start(G.mode); };
+document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
+$('langBtn').onclick = () => { const k = Object.keys(LANGS); G.lang = k[(k.indexOf(G.lang) + 1) % k.length]; saveG(); renderShelf(); };
 
 function setText(id) {
   const m = LIB.find(x => x.id === id);
   M = m; P = m.phrases; CHUNKS = m.chunks; S = progOf(m);
-  G.last = m.id; saveG();
+  G['last.' + (m.lang || 'el')] = m.id; saveG();
   loadAudio(m); loadLex(m);
 }
 function openText(id) { setText(id); push(id); show('home'); }
@@ -688,64 +697,8 @@ EK.onRemote = ({ progress, log, settings }) => {
   Object.keys(touched).forEach(id => { touched[id].log.sort((a, b) => a.t.localeCompare(b.t)); writeProg(byId[id], touched[id]); });
   /* перерисовать то, что видно и не мешает занятию: полку и экран текста */
   paintTheme(); paintSpeed();
-  if (!impAsked && anyProgress()) $('imp').classList.add('hidden');  /* прогресс пришёл с другого устройства — переносить уже не нужно */
   if (shown('shelf')) renderShelf();
   else if (shown('home')) renderHome();
-};
-
-/* --- перенос с пробной страницы: её прогресс живёт только у неё (другой адрес), поэтому — через «Скопировать итог» --- */
-function importPilot(txt) {
-  const byId = Object.fromEntries(LIB.map(m => [m.id, m]));
-  const CL = { 'зел': 'g', 'жёл': 'y', 'кр': 'r' };
-  let m = null, inLog = false, nC = 0, nL = 0;
-  const data = {};
-  txt.split(/\r?\n/).forEach(line => {
-    const h = line.match(/^## (\S+) — /);
-    if (h) { m = byId[h[1]] || null; inLog = false; if (m) data[m.id] = data[m.id] || { rows: {}, log: [] }; return; }
-    if (line.startsWith('## ')) { m = null; return; }
-    if (!m) return;
-    if (line.trim() === 'Журнал:') { inLog = true; return; }
-    if (inLog) {
-      const l = line.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d) (\S+) (\S+) ([gyr])$/);
-      if (l) data[m.id].log.push({ t: l[1], p: l[2], m: l[3], c: l[4] });
-      return;
-    }
-    const r = line.match(/^(\S+) (зел|жёл|кр|—)(?: \| написал: (.*))?$/);
-    if (r && m.phrases.some(p => p.id === r[1])) data[m.id].rows[r[1]] = { c: CL[r[2]] || null, w: r[3] || null };
-  });
-  Object.keys(data).forEach(id => {
-    const mm = byId[id], s = id === (M && M.id) ? S : progOf(mm), d = data[id];
-    const lastT = {}; d.log.forEach(l => { lastT[l.p] = l.t; });
-    Object.keys(d.rows).forEach(pid => {
-      const at = lastT[pid] ? lastT[pid] + ':00.000Z' : now();  /* время — по журналу пробной страницы: позднее изменение здесь важнее */
-      if (s.ts[pid] && s.ts[pid] >= at) return;
-      const r = d.rows[pid];
-      if (r.c) s.colors[pid] = r.c; if (r.w) s.written[pid] = r.w;
-      s.ts[pid] = at; nC++;
-      EK.queueProgress({ lang: mm.lang || 'el', text_id: id, phrase_id: pid, cut: mm.cut || 1, color: s.colors[pid] || null, written: s.written[pid] || null, updated_at: at });
-    });
-    const have = new Set(s.log.map(l => l.t + l.p + l.m + l.c));
-    d.log.forEach(l => {
-      if (have.has(l.t + l.p + l.m + l.c)) return;
-      const lid = uuid(); s.log.push(Object.assign({ id: lid }, l)); nL++;
-      EK.queueLog({ id: lid, at: l.t + ':00.000Z', kind: 'mark', lang: mm.lang || 'el', text_id: id, phrase_id: l.p, mode: l.m, color: l.c });
-    });
-    s.log.sort((a, b) => a.t.localeCompare(b.t));
-    writeProg(mm, s);
-  });
-  return { texts: Object.keys(data).length, nC, nL };
-}
-const IMPKEY = 'ekmafisi.imported';
-const anyProgress = () => LIB.some(m => { const s = progOf(m); return s.log.length || Object.keys(s.colors).length; });
-let impAsked = false;
-$('impOpen').onclick = () => { impAsked = true; $('imp').classList.remove('hidden'); $('impMsg').textContent = ''; $('imp').scrollIntoView({ block: 'start' }); };
-$('impNo').onclick = () => { write(IMPKEY, true); $('imp').classList.add('hidden'); };
-$('impGo').onclick = () => {
-  const r = importPilot($('impText').value);
-  if (!r.texts) { $('impMsg').textContent = 'Не нашёл в тексте прогресса. Нужен весь итог целиком, вместе со строками «## …».'; return; }
-  write(IMPKEY, true); $('impText').value = '';
-  $('impMsg').textContent = `Перенесено: фраз с цветом или записью — ${r.nC}, записей журнала — ${r.nL}.`;
-  renderShelf();
 };
 
 /* --- кто вошёл и состояние отправки --- */
@@ -754,8 +707,6 @@ EK.onStatus = st => { $('acctSync').textContent = SYNC_LBL[st] ? '· ' + SYNC_LB
 $('acctWho').textContent = EK.email || '';
 $('signOut').onclick = () => EK.signOut();
 EK.onStatus(EK.status || (navigator.onLine ? '' : 'offline'));
-/* первый вход: прогресса нет, перенос ещё не предлагался — показать сразу */
-if (!EK.DEV && !anyProgress() && !read(IMPKEY)) $('imp').classList.remove('hidden');
 
 /* --- вход: ссылка прямо на текст или режим (#id, #id-skor) — достраиваем шаги назад: полка ← текст ← режим --- */
 if (!history.state || history.state.d === undefined) {
@@ -766,3 +717,9 @@ if (!history.state || history.state.d === undefined) {
 }
 applyLoc(true);
 EK.sync();  /* подтянуть с сервера то, что изменилось на других устройствах */
+
+/* --- новая версия оболочки встала: на полке — перезапуск сразу, в занятии — полоска; вернулся на полку — перезапуск --- */
+window.EK_APP = true;
+const updNow = () => { if (shown('shelf') && !sheetNow) location.reload(); else $('upd').classList.remove('hidden'); };
+window.addEventListener('ekmafisi-update', updNow);
+if (window.EK_UPDATE) updNow();

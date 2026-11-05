@@ -5,7 +5,7 @@
 (() => {
   const C = window.EKM_CONFIG;
   const $ = id => document.getElementById(id);
-  const DEV = location.hostname === 'localhost' && (new URLSearchParams(location.search).has('dev') || sessionStorage.getItem('ekmafisi.dev') === '1');
+  const DEV = ['localhost', '127.0.0.1'].includes(location.hostname) && (new URLSearchParams(location.search).has('dev') || sessionStorage.getItem('ekmafisi.dev') === '1');
   if (DEV) sessionStorage.setItem('ekmafisi.dev', '1');
   const sb = DEV ? null : supabase.createClient(C.url, C.key, { auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true, autoRefreshToken: true } });
   const UKEY = 'ekmafisi.user';  /* кто вошёл на этом устройстве — чтобы без сети открыть приложение без запроса к серверу */

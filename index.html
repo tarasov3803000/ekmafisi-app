@@ -75,7 +75,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .hidden { display: none !important; }
 .tally { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line); }
 .tally span { display: block; }
-.chip.lang { background: none; border: 1px solid var(--line); color: var(--muted); }
+.chip.lang { display: none; }  /* на полке всегда один язык — значок языка не нужен */
 .chip { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
 
 /* полка */
@@ -113,7 +113,6 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .dot.g { background: var(--g); border-color: var(--g); }
 .dot.y { background: var(--y); border-color: var(--y); }
 .dot.r { background: var(--r); border-color: var(--r); }
-.task ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
 .links { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
 .links button, .links a { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
 .loading { font-size: 13px; color: var(--muted); }
@@ -194,6 +193,7 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
 .err { color: var(--r); font-size: 14px; }
 .acct { font-size: 13px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
 .acct button { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-size: 13px; font-weight: 600; }
+.upd { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20; border: 0; border-radius: 999px; padding: 10px 18px; background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 @media (prefers-reduced-motion: no-preference) { .btn, .colors button, .text { transition: transform .08s; } .btn:active, .text:active { transform: scale(.985); } }
 </style>
 </head>
@@ -213,34 +213,19 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
 </main>
 
 <main id="shelf" class="hidden">
-  <div class="brand"><b>Экмафиси</b><span class="small muted">греческий и английский — живым голосом</span></div>
+  <section id="langPick" class="card hidden">
+    <h2>Что учите</h2>
+    <div class="row"><button class="btn" data-lang="el" style="flex:1">Греческий</button><button class="btn" data-lang="en" style="flex:1">Английский</button></div>
+    <p class="small muted">Сменить — внизу, «Учу: …». Прогресс каждого языка хранится свой.</p>
+  </section>
   <button class="btn primary wide resume hidden" id="resume" style="min-height:64px"></button>
-  <section class="shelf">
+  <section class="shelf" id="shelfList">
     <h2>Тексты</h2>
     <div class="shelf" id="texts"></div>
   </section>
 
-  <section class="card task">
-    <h2>Задание на проверку</h2>
-    <p class="small">Каждый — на своём телефоне, 15–20 минут, в наушниках или вслух. Текст выберите сами: «Ёлка» проще, «Περίμενε» сложнее.</p>
-    <ol class="small">
-      <li><b>Скороговорка</b>, первые 5 фраз. Скорость — 0,8×, оригинал или 1,5× — переключается на самой фразе.</li>
-      <li><b>Обратный перевод</b>: один кусок голосом, один — письмом (нужна клавиатура языка текста: греческая или английская).</li>
-      <li>Цвет — честно: зелёный — скажу сам, жёлтый — с подсказкой, красный — не вышло.</li>
-      <li><b>Завтра</b>: «Обратный перевод» тех же кусков, но оригинал сразу закрыть — сколько осталось зелёных?</li>
-      <li>Нажмите «Скопировать итог» и пришлите, добавив три строки: сколько минут ушло; что мешало; какой режим хочется повторить.</li>
-    </ol>
-  </section>
-
-  <div class="links"><button id="copy">Скопировать итог</button><button id="theme"></button><button id="impOpen">Перенести с пробной страницы</button></div>
+  <div class="links"><button id="langBtn"></button><button id="theme"></button><button id="copy">Скопировать итог</button></div>
   <div id="copyWrap" class="card hidden"><p class="small">Скопируйте текст вручную:</p><textarea class="copybox" id="copyText" readonly></textarea></div>
-  <section id="imp" class="card hidden">
-    <h2>Прогресс с пробной страницы</h2>
-    <p class="small">Пробная страница хранит цвета только у себя. Откройте её, нажмите там «Скопировать итог» и вставьте сюда.</p>
-    <textarea class="copybox" id="impText" placeholder="Экмафиси · 2026-11-05 · …"></textarea>
-    <p class="small" id="impMsg"></p>
-    <div class="row"><button class="btn primary" id="impGo">Перенести</button><button class="btn" id="impNo">Не нужно</button></div>
-  </section>
   <div class="acct"><span id="acctWho"></span><span id="acctSync"></span><button id="signOut">Выйти</button></div>
 </main>
 
@@ -347,6 +332,22 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
 <script src="config.js"></script>
 <script src="vendor/supabase.js"></script>
 <script src="sync.js"></script>
-<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
+<button id="upd" class="upd hidden">Новая версия — обновить</button>
+<script>
+/* обновление по воздуху: новая оболочка скачивается сама (при открытии и каждом возвращении в приложение);
+   встала — на полке или экране входа страница перезапускается сама, посреди занятия — полоска «Новая версия — обновить» */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  });
+  let had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!had) { had = true; return; }  /* первая установка — не обновление */
+    window.EK_UPDATE = true;
+    if (!window.EK_APP) location.reload(); else window.dispatchEvent(new Event('ekmafisi-update'));
+  });
+}
+document.getElementById('upd').onclick = () => location.reload();
+</script>
 </body>
 </html>
