@@ -1,10 +1,20 @@
 /* Экмафиси — логика приложения (из пробной страницы). Грузится из sync.js, когда вход проверен и список текстов есть:
    EK.lib — тексты, EK.uid — кто вошёл, EK.content(путь) — файл из закрытого хранилища (с кэшем), EK.queue* — отправка. */
 const LIB = EK.lib;
-LIB.forEach(m => m.phrases.forEach(p => { if (p.el === undefined) p.el = p.t; }));  /* английские материалы — поле t */
 const LEVELS = { A1: 1, A2: 2, B1: 3, B2: 4 };
-LIB.sort((a, b) => (LEVELS[a.level] || 9) - (LEVELS[b.level] || 9));
 const MODE_NAME = { skor: 'Скороговорка', bt: 'Обратный перевод' };
+/* язык материала: текст фразы — поле t (прежние греческие материалы — el), порядок форм глагола и надписи — по языку */
+const LANGS = {
+  el: { name: 'греческий', chip: 'ΕΛ', say: 'по-гречески', forms: ['present', 'imperfect', 'aorist', 'future'] },
+  en: { name: 'английский', chip: 'EN', say: 'по-английски', forms: ['base', 'past', 'participle'] }
+};
+const LG = m => LANGS[m.lang] || LANGS.el;
+const TX = p => p.t ?? p.el;
+const TTL = m => m.title_t ?? m.title_el;
+const AUTHOR = m => m.source.author_ru || m.source.author;
+/* полка: сначала по языку (греческий, английский), внутри — по уровню; одинаковые — в порядке сборки */
+const LORD = Object.keys(LANGS);
+LIB.sort((a, b) => (LORD.indexOf(a.lang) - LORD.indexOf(b.lang)) || (LEVELS[a.level] || 9) - (LEVELS[b.level] || 9));
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
 
@@ -185,10 +195,10 @@ function renderShelf() {
     const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
     const done = c.g + c.y + c.r;
     return `<button class="text${G.last === m.id ? ' last' : ''}" data-id="${m.id}">
-      <span class="top"><span class="chip">${esc(m.level)}</span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(m))}</span></span>
+      <span class="top"><span class="row" style="gap:6px"><span class="chip lang" title="${esc(LG(m).name)}">${esc(LG(m).chip)}</span><span class="chip">${esc(m.level)}</span></span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(m))}</span></span>
       <span class="t">${esc(m.title)}</span>
-      <span class="tel">${esc(m.title_el)}</span>
-      <span class="meta2">${esc(m.source.author === 'Αλεξάνδρα' ? 'Александра' : m.source.author)}, «${esc(m.source.channel)}»${done ? ` · отмечено ${done} из ${n}, зелёных ${c.g}` : ''}</span>
+      <span class="tel">${esc(TTL(m))}</span>
+      <span class="meta2">${esc(AUTHOR(m))}, «${esc(m.source.channel)}»${done ? ` · отмечено ${done} из ${n}, зелёных ${c.g}` : ''}</span>
       <span class="tally" aria-hidden="true">${tallyHtml(c, n)}</span>
     </button>`;
   }).join('');
@@ -210,13 +220,13 @@ function openText(id) { setText(id); push(id); show('home'); }
 /* --- текст --- */
 function renderHome() {
   const c = counts(M, S.colors), n = P.length;
-  $('hSrc').textContent = `${M.level} · ${M.source.author === 'Αλεξάνδρα' ? 'Александра' : M.source.author}, «${M.source.channel}»`;
-  $('hTitle').textContent = M.title; $('hTitleEl').textContent = M.title_el;
-  $('ytLink').href = M.source.url;
+  $('hSrc').textContent = `${LG(M).name} · ${M.level} · ${AUTHOR(M)}, «${M.source.channel}»`;
+  $('hTitle').textContent = M.title; $('hTitleEl').textContent = TTL(M);
+  $('ytLink').classList.toggle('hidden', !M.source.url); if (M.source.url) $('ytLink').href = M.source.url;
   $('stat').textContent = `${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(M))} · зелёных ${c.g}, жёлтых ${c.y}, красных ${c.r}, без цвета ${n - c.g - c.y - c.r}`;
   $('tally').innerHTML = tallyHtml(c, n);
   $('run').textContent = 'Запустить · ' + MODE_NAME[G.mode];
-  $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="dot ${S.colors[p.id] || ''}"></span><span class="el">${esc(p.el)}</span><span class="ru">${esc(p.ru)}</span></button><button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
+  $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="dot ${S.colors[p.id] || ''}"></span><span class="el">${esc(TX(p))}</span><span class="ru">${esc(p.ru)}</span></button><button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
   document.querySelectorAll('#list .ph').forEach(r => {
     const i = +r.dataset.i;
     r.querySelector('.ph-play').onclick = () => toggle(r, () => { playBy(r, i, G.rate, () => r.classList.remove('playing')); r.classList.add('playing'); });
@@ -262,16 +272,15 @@ $('resetYes').onclick = () => {
 };
 
 /* --- подсказка по слову --- */
-const FL = { present: 'настоящее', imperfect: 'παρατατικός', aorist: 'аорист', future: 'будущее' };
 function wordsHtml(p) {  /* слова из words — в настоящем тексте фразы, со всей пунктуацией */
   let h = '', at = 0;
   p.words.forEach((w, k) => {
-    const pos = p.el.indexOf(w.t, at);
+    const pos = TX(p).indexOf(w.t, at);
     if (pos < 0) return;
-    h += esc(p.el.slice(at, pos)) + (w.l ? `<span class="w" data-k="${k}" data-l="${esc(w.l)}">${esc(w.t)}</span>` : esc(w.t));
+    h += esc(TX(p).slice(at, pos)) + (w.l ? `<span class="w" data-k="${k}" data-l="${esc(w.l)}">${esc(w.t)}</span>` : esc(w.t));
     at = pos + w.t.length;
   });
-  return h + esc(p.el.slice(at));
+  return h + esc(TX(p).slice(at));
 }
 /* пометка к слову в контексте без повтора перевода: часть «X — …», где X уже есть в переводе леммы, не показывается */
 function noteOf(w, L) {
@@ -280,13 +289,13 @@ function noteOf(w, L) {
   return w.g.split(/;\s*/).filter(s => { const head = s.split(' — ')[0]; return !(s.includes(' — ') && /\p{Script=Greek}/u.test(head) && ru.includes(base(head))); }).join('; ');
 }
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
-const formsOf = (L, D) => L.forms ? Object.keys(FL).map(k => (L.forms[k] || '—').replace(/ /g, '\u00a0')).join(' · ') : (D && D.dict.forms) || '';
+const formsOf = (L, D) => L.forms ? LG(M).forms.map(k => (L.forms[k] || '—').replace(/ /g, '\u00a0')).join(' · ') : (D && D.dict.forms) || '';
 function glossHtml(w) {
   const L = M.lexicon[w.l] || {}, D = LEX[w.l];
   let h = `<div>${esc(cap(L.ru || (D && D.dict.senses[0] && D.dict.senses[0].ru) || ''))}</div>`;
   const g = noteOf(w, L);
   if (g) h += `<div class="small muted">${esc(cap(g))}</div>`;
-  /* формы строкой, без названий времён: у глагола всегда настоящее · παρατατικός · аорист · будущее */
+  /* формы строкой, без названий времён: el — настоящее · παρατατικός · аорист · будущее; en — base · past · participle, только у неправильных */
   const f = formsOf(L, D);
   if (f) h += `<div class="el">${esc(f)}</div>` + (L.note ? `<div class="small muted">${esc(cap(L.note))}</div>` : '');
   else if (base(w.t) !== base(w.l)) h += `<div class="el">${esc(w.l)}</div>`;
@@ -312,8 +321,8 @@ function loadLex(m) {
   lexLoaded[m.id] = true;
   EK.content(m.slovar).then(r => r.json()).then(d => Object.assign(LEX, d || {})).catch(() => { lexLoaded[m.id] = false; });
 }
-const lexOf = l => { for (const m of LIB) if (m.lexicon[l]) return m.lexicon[l]; return null; };
-const phraseOf = l => { for (const m of [M, ...LIB].filter(Boolean)) for (const p of m.phrases) if (p.words.some(w => w.l === l)) return p; return null; };
+const lexOf = l => { for (const m of LIB) if ((!M || m.lang === M.lang) && m.lexicon[l]) return m.lexicon[l]; return null; };
+const phraseOf = l => { for (const m of [M, ...LIB].filter(x => x && (!M || x.lang === M.lang))) for (const p of m.phrases) if (p.words.some(w => w.l === l)) return p; return null; };
 const EKEY = 'ekmafisi.etym', FKEY = 'ekmafisi.etymflags';
 let sheetNow = null;
 function openEtym(l) {
@@ -335,7 +344,7 @@ function headHtml(l, D) {
   const L = lexOf(l) || {}, p = phraseOf(l), forms = formsOf(L, D);
   return `<div class="e-head"><span class="lem">${esc(l)}</span><span>${esc(cap(L.ru || D.dict.senses[0]?.ru || ''))}</span>
       ${forms ? `<span class="el muted">${esc(forms)}</span>` : ''}
-      ${p ? `<span class="small muted"><span class="el">${esc(p.el)}</span></span>` : ''}</div>`;
+      ${p ? `<span class="small muted"><span class="el">${esc(TX(p))}</span></span>` : ''}</div>`;
 }
 function renderSenses(l) {
   const D = LEX[l];
@@ -346,7 +355,7 @@ function renderSenses(l) {
 function renderEtym(l) {
   const D = LEX[l];
   $('eTtl').textContent = 'Происхождение';
-  if (!D) { $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статьи пока нет: в пробе — 50 слов «Ёлки» и βάζω.</p>`; return; }
+  if (!D) { $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">${M && M.lang !== 'el' ? 'Статей о происхождении для этого языка пока нет.' : 'Статьи пока нет: в пробе — 50 слов «Ёлки» и βάζω.'}</p>`; return; }
   const e = D.etym;
   const END = { unknown: 'Дальше происхождение неизвестно.', reconstruction_only: 'Дальше — только реконструкции; их не приводим.' };
   $('eBody').innerHTML = headHtml(l, D) + `
@@ -410,7 +419,7 @@ document.addEventListener('contextmenu', e => { if (e.target.closest('.w')) e.pr
 
 /* --- Скороговорка --- */
 const STEPS = [
-  { lbl: '0,8×', rate: 0.8, hint: 'Говорите вместе с Александрой' },
+  { lbl: '0,8×', rate: 0.8, hint: 'Говорите вместе с автором' },
   { lbl: 'оригинал', rate: 1, hint: 'Вместе, в темпе оригинала' },
   { lbl: 'по памяти', rate: 1, hint: 'Текст скрыт. Скажите по памяти, потом сверьтесь со звуком' },
   { lbl: 'быстро', rate: 1.15, hint: 'Скороговоркой, быстрее оригинала — три раза подряд без запинки' }
@@ -436,7 +445,7 @@ function skorRender() {
   $('sPeek').classList.toggle('hidden', !hide);
   $('sRu').textContent = p.ru;
   $('sGloss').classList.add('hidden');
-  $('sHint').textContent = (sk.step === 1 && G.rate > 1 ? 'Вместе, в полтора раза быстрее оригинала' : st.hint).replace('Александрой', M.source.author === 'Αλεξάνδρα' ? 'Александрой' : 'автором');
+  $('sHint').textContent = (sk.step === 1 && G.rate > 1 ? 'Вместе, в полтора раза быстрее оригинала' : st.hint).replace('с автором', M.source.with_ru || 'с автором');
   const fast = sk.step === 3;
   $('sSpeed').classList.toggle('hidden', sk.step > 1);
   paintSpeed();
@@ -494,8 +503,9 @@ $('b1Next').onclick = () => { stop(); $('b1').classList.add('hidden'); $('b2').c
 function renderB2() {
   document.querySelectorAll('#inMode button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.i === G.input)));
   const text = G.input === 'text';
-  $('b2Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line"><span>${esc(P[i].ru)}</span>${text ? `<textarea id="in-${i}" lang="el" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(P[i].ru)}"></textarea>` : ''}</div>`).join('');
+  $('b2Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line"><span>${esc(P[i].ru)}</span>${text ? `<textarea id="in-${i}" lang="${esc(M.lang || 'el')}" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(P[i].ru)}"></textarea>` : ''}</div>`).join('');
   $('b2Next').textContent = text ? 'Сверить' : 'Сказал(а) — сверить';
+  $('b2Hint').textContent = 'Скажите ' + LG(M).say;
 }
 document.querySelectorAll('#inMode button').forEach(b => b.onclick = () => {
   const keep = {}; document.querySelectorAll('#b2Lines textarea').forEach(t => keep[t.id] = t.value);
@@ -512,6 +522,20 @@ $('b2Next').onclick = () => {
 /* сверка написанного: слова сводятся с оригиналом (одинаковые — и похожие, если совпадает хотя бы половина букв),
    в похожих выделяются только ошибочные буквы; ударение — отдельной пометкой, регистр не в счёт */
 const tok = s => s.match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) || [];
+/* английский: слово с апострофом — одно (don't, bug's), ’ и ' — одно и то же; для сверки слово раскладывается на части:
+   сокращение — на полную форму (I'm = I am, don't = do not, can't = can not = cannot), британское — на американское (colour = color) */
+const tokEn = s => s.replace(/[’‘ʼ`]/g, "'").match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu) || [];
+const EN_WHOLE = { "can't": 'can not', cannot: 'can not', "won't": 'will not', "shan't": 'shall not', "ain't": 'is not', "let's": 'let us', "y'all": 'you all', outta: 'out of', gonna: 'going to', wanna: 'want to', gotta: 'got to' };
+const EN_IS = new Set(['he', 'she', 'it', 'that', 'there', 'here', 'what', 'who', 'where', 'how', 'when', 'this']);  /* 's после них — is; у прочих — притяжательное */
+const EN_TAIL = { "n't": ' not', "'m": ' am', "'re": ' are', "'ve": ' have', "'ll": ' will', "'d": ' would' };
+const EN_BR = { colour: 'color', colours: 'colors', favourite: 'favorite', favourites: 'favorites', neighbour: 'neighbor', neighbours: 'neighbors', honour: 'honor', centre: 'center', theatre: 'theater', metre: 'meter', litre: 'liter', grey: 'gray', mum: 'mom', mummy: 'mommy', travelling: 'traveling', travelled: 'traveled', realise: 'realize', organise: 'organize', practise: 'practice', programme: 'program', jewellery: 'jewelry', pyjamas: 'pajamas', cheque: 'check', tyre: 'tire', aeroplane: 'airplane' };
+function partsEn(w) {
+  let x = w.toLowerCase();
+  if (EN_WHOLE[x]) return EN_WHOLE[x].split(' ');
+  for (const k in EN_TAIL) if (x.endsWith(k) && x.length > k.length) return (x.slice(0, -k.length) + EN_TAIL[k]).split(' ').map(y => EN_BR[y] || y);
+  if (x.endsWith("'s") && EN_IS.has(x.slice(0, -2))) return [x.slice(0, -2), 'is'];
+  return [EN_BR[x] || x];
+}
 const base = w => w.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/ς/g, 'σ');  /* без ударений и регистра — для карточки слова и статьи */
 const gl =w => w.normalize('NFD').match(/\P{M}\p{M}*/gu) || [];  /* буква со своими знаками */
 const gb = g => g[0].toLowerCase().replace(/ς/g, 'σ');
@@ -544,29 +568,50 @@ function sim(u, o) {  /* 2 — то же слово (без ударений), �
   const v = 1 - lev(A, B)[A.length][B.length] / Math.max(A.length, B.length);
   return v >= .5 ? v : -1;
 }
-function diff(user, orig) {
-  const a = tok(user), b = tok(orig), n = a.length, m = b.length;
-  const S = Array.from({ length: n }, (_, i) => b.map(w => sim(a[i], w)));
+function diff(user, orig, lang) {
+  /* слова раскладываются на части (у греческого часть — само слово); части сводятся с оригиналом; слово, все части которого
+     совпали, — верное; слово из одной части против слова из одной части — с разметкой букв; иначе — целиком лишнее/пропущенное */
+  const split = s => lang === 'en' ? tokEn(s).map(w => ({ w, parts: partsEn(w) })) : tok(s).map(w => ({ w, parts: [w] }));
+  const A = split(user), B = split(orig);
+  const pa = A.flatMap((x, k) => x.parts.map(p => ({ p, k }))), pb = B.flatMap((x, k) => x.parts.map(p => ({ p, k })));
+  const n = pa.length, m = pb.length;
+  const S = Array.from({ length: n }, (_, i) => pb.map(y => sim(pa[i].p, y.p)));
   const T = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
     T[i][j] = Math.max(T[i + 1][j], T[i][j + 1], S[i][j] > 0 ? T[i + 1][j + 1] + S[i][j] : -1);
-  const U = a.map(w => `<span class="bad">${esc(w)}</span>`), O = b.map(w => `<span class="miss">${esc(w)}</span>`);
+  const ma = new Array(n).fill(null), mb = new Array(m).fill(null);
   let i = 0, j = 0;
   while (i < n && j < m) {
-    if (S[i][j] > 0 && T[i][j] === T[i + 1][j + 1] + S[i][j]) { [U[i], O[j]] = charDiff(a[i], b[j]); i++; j++; }
+    if (S[i][j] > 0 && T[i][j] === T[i + 1][j + 1] + S[i][j]) { ma[i] = j; mb[j] = i; i++; j++; }
     else if (T[i][j] === T[i + 1][j]) i++;
     else j++;
   }
+  const U = A.map(x => `<span class="bad">${esc(x.w)}</span>`), O = B.map(x => `<span class="miss">${esc(x.w)}</span>`);
+  const own = (P, k) => P.map((x, q) => x.k === k ? q : -1).filter(q => q >= 0);
+  B.forEach((x, k) => {
+    const qs = own(pb, k), q0 = mb[qs[0]], ka0 = q0 !== null ? pa[q0].k : -1;
+    if (qs.length === 1 && q0 !== null && A[ka0].parts.length === 1) {  /* слово против слова — по буквам (ударение — пометкой) */
+      if (lang === 'en' && pa[q0].p === pb[qs[0]].p) { U[ka0] = esc(A[ka0].w); O[k] = esc(x.w); }  /* colour = color, I = i */
+      else [U[ka0], O[k]] = charDiff(A[ka0].w, x.w);
+    } else if (qs.every(q => mb[q] !== null && pa[mb[q]].p === pb[q].p)) {  /* все части совпали — верно, как бы ни было записано (I'm = I am) */
+      O[k] = esc(x.w);
+      qs.forEach(q => { const ka = pa[mb[q]].k; if (own(pa, ka).every(r => ma[r] !== null && pa[r].p === pb[ma[r]].p)) U[ka] = esc(A[ka].w); });
+    } else {  /* сокращение без апострофа (doesnt) — по буквам: выделяется только недостающий апостроф */
+      const bare = w => w.toLowerCase().replace(/'/g, '');
+      const ka = qs.map(q => mb[q]).filter(r => r !== null).map(r => pa[r].k).find(t => bare(A[t].w) === bare(x.w));
+      if (ka !== undefined) [U[ka], O[k]] = charDiff(A[ka].w, x.w);
+    }
+  });
   return { u: U.join(' '), o: O.join(' ') };
 }
 function renderB3(answers) {
   $('b3Lines').innerHTML = CHUNKS[bc].map(i => {
     const p = P[i], a = answers[i];
-    const d = a ? diff(a, p.el) : null;
+    const d = a ? diff(a, TX(p), M.lang) : null;
     return `<div class="cmp" data-i="${i}">
       <span class="small muted">${esc(p.ru)}</span>
       ${a ? `<span class="el you">${d.u}</span>` : ''}
-      <span class="el">${d ? d.o : esc(p.el)}</span>
+      <span class="el">${d ? d.o : esc(TX(p))}</span>
       <div class="colors sm"><button class="g" data-c="g" aria-pressed="false">Знаю</button><button class="y" data-c="y" aria-pressed="false">Повторить</button><button class="r" data-c="r" aria-pressed="false">Трудно</button></div>
     </div>`;
   }).join('');

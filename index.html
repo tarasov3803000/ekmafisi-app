@@ -75,6 +75,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .hidden { display: none !important; }
 .tally { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--line); }
 .tally span { display: block; }
+.chip.lang { background: none; border: 1px solid var(--line); color: var(--muted); }
 .chip { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
 
 /* полка */
@@ -212,7 +213,7 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
 </main>
 
 <main id="shelf" class="hidden">
-  <div class="brand"><b>Экмафиси</b><span class="small muted">греческий по живым роликам</span></div>
+  <div class="brand"><b>Экмафиси</b><span class="small muted">греческий и английский — живым голосом</span></div>
   <button class="btn primary wide resume hidden" id="resume" style="min-height:64px"></button>
   <section class="shelf">
     <h2>Тексты</h2>
@@ -224,7 +225,7 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
     <p class="small">Каждый — на своём телефоне, 15–20 минут, в наушниках или вслух. Текст выберите сами: «Ёлка» проще, «Περίμενε» сложнее.</p>
     <ol class="small">
       <li><b>Скороговорка</b>, первые 5 фраз. Скорость — 0,8×, оригинал или 1,5× — переключается на самой фразе.</li>
-      <li><b>Обратный перевод</b>: один кусок голосом, один — письмом (нужна греческая клавиатура).</li>
+      <li><b>Обратный перевод</b>: один кусок голосом, один — письмом (нужна клавиатура языка текста: греческая или английская).</li>
       <li>Цвет — честно: зелёный — скажу сам, жёлтый — с подсказкой, красный — не вышло.</li>
       <li><b>Завтра</b>: «Обратный перевод» тех же кусков, но оригинал сразу закрыть — сколько осталось зелёных?</li>
       <li>Нажмите «Скопировать итог» и пришлите, добавив три строки: сколько минут ушло; что мешало; какой режим хочется повторить.</li>
@@ -321,7 +322,7 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
     <div class="row"><button class="btn" id="b1Play" data-lbl="▶ Слушать всё">▶ Слушать всё</button><button class="btn primary" id="b1Next" style="flex:1">Закрыть оригинал</button></div>
   </section>
   <section id="b2" class="card hidden">
-    <div class="row" style="justify-content:space-between"><p class="hint">Скажите по-гречески</p>
+    <div class="row" style="justify-content:space-between"><p class="hint" id="b2Hint">Скажите по-гречески</p>
       <div class="seg" id="inMode" role="group" aria-label="Способ ответа"><button data-i="voice">Голосом</button><button data-i="text">Письмом</button></div>
     </div>
     <div class="lines" id="b2Lines"></div>

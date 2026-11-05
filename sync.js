@@ -42,10 +42,10 @@
     } catch (e) { if (hit) return hit; throw e; }
   };
   async function loadLibrary() {
-    const r = await EK.content('el/library.json', navigator.onLine);
+    const r = await EK.content('library.json', navigator.onLine);
     const lib = await r.json();
     /* старые версии звука и словаря — из кэша вон */
-    const keep = new Set([ckey('el/library.json')]);
+    const keep = new Set([ckey('library.json')]);
     lib.forEach(m => { keep.add(ckey(m.audio.file)); if (m.slovar) keep.add(ckey(m.slovar)); });
     caches.open(CC).then(c => c.keys().then(ks => ks.forEach(q => keep.has(q.url) || c.delete(q))));
     return lib;
