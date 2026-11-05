@@ -191,6 +191,8 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
 .gate .brand { justify-content: center; }
 .gate p { max-width: 22em; }
 .err { color: var(--r); font-size: 14px; }
+.topbar { display: flex; justify-content: flex-end; gap: 4px; margin: -8px -8px -8px 0; }
+.topbar .icon { border: 0; background: none; padding: 8px; color: var(--muted); display: inline-flex; border-radius: 10px; }
 .acct { font-size: 13px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
 .acct button { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-size: 13px; font-weight: 600; }
 .upd { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20; border: 0; border-radius: 999px; padding: 10px 18px; background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
@@ -213,10 +215,14 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
 </main>
 
 <main id="shelf" class="hidden">
+  <div class="topbar">
+    <button class="icon" id="theme" aria-label="Тема"></button>
+    <button class="icon" id="setOpen" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div>
   <section id="langPick" class="card hidden">
     <h2>Что учите</h2>
     <div class="row"><button class="btn" data-lang="el" style="flex:1">Греческий</button><button class="btn" data-lang="en" style="flex:1">Английский</button></div>
-    <p class="small muted">Сменить — внизу, «Учу: …». Прогресс каждого языка хранится свой.</p>
+    <p class="small muted">Сменить можно в настройках. Прогресс каждого языка хранится свой.</p>
   </section>
   <button class="btn primary wide resume hidden" id="resume" style="min-height:64px"></button>
   <section class="shelf" id="shelfList">
@@ -224,9 +230,30 @@ textarea { width: 100%; min-height: 64px; font: 18px/1.4 var(--f-el); border: 1p
     <div class="shelf" id="texts"></div>
   </section>
 
-  <div class="links"><button id="langBtn"></button><button id="theme"></button><button id="copy">Скопировать итог</button></div>
-  <div id="copyWrap" class="card hidden"><p class="small">Скопируйте текст вручную:</p><textarea class="copybox" id="copyText" readonly></textarea></div>
-  <div class="acct"><span id="acctWho"></span><span id="acctSync"></span><button id="signOut">Выйти</button></div>
+</main>
+
+<main id="settings" class="hidden">
+  <div class="bar"><button class="back" data-go="shelf" aria-label="Назад">←</button><span class="ttl">Настройки</span></div>
+  <section class="card">
+    <h2>Учу</h2>
+    <div class="seg" id="setLang" role="group" aria-label="Язык обучения"><button data-lang="el">греческий</button><button data-lang="en">английский</button></div>
+    <p class="small muted">Прогресс каждого языка хранится свой.</p>
+  </section>
+  <section class="card">
+    <h2>Тема</h2>
+    <div class="seg" id="setTheme" role="group" aria-label="Тема"><button data-t="auto">авто</button><button data-t="light">светлая</button><button data-t="dark">тёмная</button></div>
+  </section>
+  <section class="card">
+    <h2>Учётная запись</h2>
+    <p><span id="acctWho"></span><br><span class="small muted" id="acctSync"></span></p>
+    <button class="btn" id="signOut" style="justify-self:start">Выйти</button>
+  </section>
+  <section class="card">
+    <h2>Итог</h2>
+    <p class="small muted">Цвета, написанное и журнал всех текстов — текстом, чтобы переслать.</p>
+    <button class="btn" id="copy" style="justify-self:start">Скопировать итог</button>
+    <div id="copyWrap" class="hidden"><p class="small">Скопируйте текст вручную:</p><textarea class="copybox" id="copyText" readonly></textarea></div>
+  </section>
 </main>
 
 <main id="home" class="hidden">

@@ -157,10 +157,11 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
-  ['shelf', 'home', 'skor', 'bt'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  ['shelf', 'settings', 'home', 'skor', 'bt'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0);
   if (id === 'shelf') { if (window.EK_UPDATE) return location.reload(); renderShelf(); }
   if (id === 'home') renderHome();
+  if (id === 'settings') renderSettings();
 }
 const shown = id => !$(id).classList.contains('hidden');
 
@@ -176,12 +177,13 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
   else { history.replaceState({ d: 0, sheet: null }, '', urlOf(fallback)); applyLoc(); }
 }
 function parseHash(h) {
+  if (h === 'settings') return { v: 'settings' };
   for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
   return LIB.some(m => m.id === h) ? { v: 'home', id: h } : { v: 'shelf' };
 }
 function applyLoc(force) {  /* force — первый вход: экран рисуется, даже если уже виден */
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
-  if (t.v === 'shelf') { if (force || !shown('shelf')) show('shelf'); }
+  if (t.v === 'shelf' || t.v === 'settings') { if (force || !shown(t.v)) show(t.v); }
   else {
     const fresh = !M || M.id !== t.id;
     if (fresh) setText(t.id);
@@ -197,7 +199,6 @@ function renderShelf() {
   /* язык не выбран — сначала выбор; выбран — на полке только его тексты */
   $('langPick').classList.toggle('hidden', !!G.lang);
   $('shelfList').classList.toggle('hidden', !G.lang);
-  $('langBtn').textContent = 'Учу: ' + (G.lang ? LANGS[G.lang].name : '—');
   $('texts').innerHTML = LIB.filter(m => m.lang === G.lang).map(m => {
     const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
     const done = c.g + c.y + c.r;
@@ -216,7 +217,14 @@ function renderShelf() {
 }
 $('resume').onclick = () => { openText(lastId()); start(G.mode); };
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
-$('langBtn').onclick = () => { const k = Object.keys(LANGS); G.lang = k[(k.indexOf(G.lang) + 1) % k.length]; saveG(); renderShelf(); };
+/* --- настройки: всё, что не учёба — язык, тема, учётная запись, итог --- */
+$('setOpen').onclick = () => { push('settings'); show('settings'); };
+function renderSettings() {
+  document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
+  document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
+}
+document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
+document.querySelectorAll('#setTheme button').forEach(b => b.onclick = () => { G.theme = b.dataset.t; saveG(); paintTheme(); renderSettings(); });
 
 function setText(id) {
   const m = LIB.find(x => x.id === id);
@@ -650,7 +658,15 @@ $('b3Next').onclick = () => {
 const THEMES = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
 function paintTheme() {
   if (G.theme === 'auto' || !THEMES[G.theme]) document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = G.theme;
-  $('theme').textContent = 'Тема: ' + (THEMES[G.theme] || THEMES.auto);
+  const t = THEMES[G.theme] ? G.theme : 'auto';
+  const svg = d => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  $('theme').innerHTML = svg({
+    auto: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
+    light: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    dark: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
+  }[t]);
+  $('theme').setAttribute('aria-label', 'Тема: ' + THEMES[t]);
+  if (shown('settings')) renderSettings();
 }
 $('theme').onclick = () => { const k = Object.keys(THEMES); G.theme = k[(k.indexOf(G.theme) + 1) % k.length]; saveG(); paintTheme(); };
 paintTheme();
