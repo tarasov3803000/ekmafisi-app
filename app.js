@@ -81,10 +81,14 @@ function loadAudio(m) {
 let stopAt = null, onEnd = null, raf = 0, seqToken = 0;
 /* «▶» — и пауза: owner — кнопка или строка, что сейчас звучит; повторное нажатие на неё ставит паузу, ещё одно — продолжает с того же места */
 let owner = null, paused = false, seqActive = false, heldNext = null;
+/* кнопка звука — значок без слова: ▶ или, пока звучит, ⏸ */
+const ICO = d => `<svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const ICO_PLAY = ICO('<path d="M6.5 3.2v17.6L21 12z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>');
+const ICO_PAUSE = ICO('<rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor"/>');
 function paintOwner() {
-  document.querySelectorAll('[data-lbl]').forEach(b => {
+  document.querySelectorAll('.ic.play').forEach(b => {
     const on = b === owner && (stopAt !== null || seqActive) && !paused;
-    b.textContent = on ? (b.dataset.lbl.length > 2 ? '⏸ Пауза' : '⏸') : b.dataset.lbl;
+    if (b.dataset.on !== String(on)) { b.dataset.on = String(on); b.innerHTML = on ? ICO_PAUSE : ICO_PLAY; }
   });
 }
 function tick() {
@@ -145,14 +149,14 @@ function playSeq(el, idx, rate, markFn) {
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const plural = (n, a, b, c) => (n % 10 === 1 && n % 100 !== 11) ? a : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? b : c;
-const fmt = s => Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0');
 const RATE_LBL = r => r === 1 ? 'оригинал' : String(r).replace('.', ',') + '×';
-const dur = m => m.audio.clip_end - m.audio.clip_start;
 function counts(m, colors) {
   const c = { g: 0, y: 0, r: 0 };
   m.phrases.forEach(p => { const v = colors[p.id]; if (v) c[v]++; });
   return c;
 }
+/* счёт по цветам — цифрой рядом с квадратиком своего цвета; пустой квадратик — без цвета */
+const squaresHtml = (c, n) => `<span class="sqs">${['g', 'y', 'r'].map(k => `<span class="sq"><i class="${k}"></i>${c[k]}</span>`).join('')}<span class="sq"><i></i>${n - c.g - c.y - c.r}</span></span>`;
 const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] / n * 100}%;background:var(--${k})"></span>`).join('');
 
 function show(id) {
@@ -192,7 +196,6 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
   sh ? openSheet(sh) : closeSheet();
 }
 window.addEventListener('popstate', () => applyLoc());
-document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goBack(b.dataset.go === 'home' ? M.id : ''));
 
 /* --- полка --- */
 function renderShelf() {
@@ -203,10 +206,11 @@ function renderShelf() {
     const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
     const done = c.g + c.y + c.r;
     return `<button class="text${lastId() === m.id ? ' last' : ''}" data-id="${m.id}">
-      <span class="top"><span class="row" style="gap:6px"><span class="chip lang" title="${esc(LG(m).name)}">${esc(LG(m).chip)}</span><span class="chip">${esc(m.level)}</span></span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(m))}</span></span>
+      <span class="top"><span class="row" style="gap:6px"><span class="chip lang" title="${esc(LG(m).name)}">${esc(LG(m).chip)}</span><span class="chip">${esc(m.level)}</span></span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')}</span></span>
       <span class="t">${esc(m.title)}</span>
       <span class="tel">${esc(TTL(m))}</span>
-      <span class="meta2">${esc(AUTHOR(m))}, «${esc(m.source.channel)}»${done ? ` · отмечено ${done} из ${n}, зелёных ${c.g}` : ''}</span>
+      <span class="meta2">${esc(AUTHOR(m))}, «${esc(m.source.channel)}»</span>
+      ${done ? squaresHtml(c, n) : ''}
       <span class="tally" aria-hidden="true">${tallyHtml(c, n)}</span>
     </button>`;
   }).join('');
@@ -224,6 +228,11 @@ function renderSettings() {
   document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
 }
 document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
+/* крупный шрифт: +3 px ко всем текстам; только на этом устройстве (экраны телефона и Мака разные), ключ вне учётной записи — читается до входа */
+const BIG = 'ekmafisi-big';
+const paintBig = () => { const on = document.documentElement.classList.contains('big'); $('setBig').setAttribute('aria-checked', String(on)); };
+$('setBig').onclick = () => { const on = document.documentElement.classList.toggle('big'); try { localStorage.setItem(BIG, on ? '1' : '0'); } catch (e) {} paintBig(); };
+paintBig();
 document.querySelectorAll('#setTheme button').forEach(b => b.onclick = () => { G.theme = b.dataset.t; saveG(); paintTheme(); renderSettings(); });
 
 function setText(id) {
@@ -240,7 +249,7 @@ function renderHome() {
   $('hSrc').textContent = `${LG(M).name} · ${M.level} · ${AUTHOR(M)}, «${M.source.channel}»`;
   $('hTitle').textContent = M.title; $('hTitleEl').textContent = TTL(M);
   $('ytLink').classList.toggle('hidden', !M.source.url); if (M.source.url) $('ytLink').href = M.source.url;
-  $('stat').textContent = `${n} ${plural(n, 'фраза', 'фразы', 'фраз')} · ${fmt(dur(M))} · зелёных ${c.g}, жёлтых ${c.y}, красных ${c.r}, без цвета ${n - c.g - c.y - c.r}`;
+  $('stat').innerHTML = `${n} ${plural(n, 'фраза', 'фразы', 'фраз')}` + squaresHtml(c, n);
   $('tally').innerHTML = tallyHtml(c, n);
   $('run').textContent = 'Запустить · ' + MODE_NAME[G.mode];
   $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="dot ${S.colors[p.id] || ''}"></span><span class="el">${esc(TX(p))}</span><span class="ru">${esc(p.ru)}</span></button><button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
@@ -353,7 +362,6 @@ function openSheet(sh) {
   $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
 }
 function closeSheet() { sheetNow = null; $('etym').classList.add('hidden'); document.body.style.overflow = ''; }
-$('eBack').onclick = () => goBack(curHash());
 $('eHist').onclick = () => { if (!sheetNow || sheetNow.k !== 'hist') { push(curHash(), { k: 'hist' }); openSheet(history.state.sheet); } };
 const elLink = s => { const cur = sheetNow && sheetNow.l; const k = Object.keys(LEX).find(l => base(l) === base(s) && l !== cur); return k ? `<button class="link el" data-etym="${esc(k)}">${esc(s)}</button>` : `<span class="el">${esc(s)}</span>`; };
 const sec = (t, body) => body ? `<section class="e-sec"><h2>${t}</h2>${body}</section>` : '';
@@ -478,13 +486,17 @@ function skorRender() {
 }
 ['sPlay', 'sPlay2'].forEach(id => $(id).onclick = () => toggle($(id), () => playBy($(id), sk.i, stepRate(sk.step))));
 /* скорость одна на всё прослушивание и запоминается: 0,8× — ступень «вместе медленно», оригинал и 1,5× — сразу в темпе */
+/* скорость — три значка под кнопкой звука:  <  1,0  >  (0,8× · оригинал · 1,5×); вжатая — светло-синим контуром */
+const CHEV = d => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+document.querySelectorAll('.speed').forEach(el => el.innerHTML =
+  `<button data-r="0.8" aria-label="Медленнее, 0,8×">${CHEV('M15 5l-7 7 7 7')}</button><button data-r="1" aria-label="Оригинал">1,0</button><button data-r="1.5" aria-label="Быстрее, 1,5×">${CHEV('M9 5l7 7-7 7')}</button>`);
 function paintSpeed() { document.querySelectorAll('.speed button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.r === G.rate))); }
 document.querySelectorAll('.speed button').forEach(b => b.onclick = () => {
   G.rate = +b.dataset.r; saveG(); paintSpeed();
   if (b.parentNode.id === 'sSpeed') { sk.first = sk.step = G.rate < 1 ? 0 : 1; sk.reps = 0; skorRender(); if (owner) audio.playbackRate = audio.defaultPlaybackRate = stepRate(sk.step); }
   else if (owner) audio.playbackRate = audio.defaultPlaybackRate = G.rate;  /* звучащее ускоряется на ходу */  /* в списке и «Обратном переводе» звучащее ускоряется на ходу */
 });
-paintSpeed();
+paintSpeed(); paintOwner();
 $('sPeek').onclick = () => { $('sText').classList.remove('hidden'); $('sVeil').classList.add('hidden'); };
 $('sNext').onclick = () => { sk.step++; sk.reps = 0; skorRender(); };
 $('sSlip').onclick = () => { sk.reps = 0; skorRender(false); };
@@ -504,7 +516,7 @@ function btOpen(c) {
   show('bt'); bc = c % CHUNKS.length; bColors = {};
   $('bCnt').textContent = `кусок ${bc + 1} / ${CHUNKS.length}`;
   ['b1', 'b2', 'b3'].forEach((x, k) => $(x).classList.toggle('hidden', k !== 0));
-  $('b1Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line" data-i="${i}"><span class="el">${wordsHtml(P[i])}</span><span class="ru-line small">${esc(P[i].ru)}</span><div class="gloss hidden"></div></div>`).join('');
+  $('b1Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line" data-i="${i}"><span class="el">${wordsHtml(P[i])}</span><span class="ru-line">${esc(P[i].ru)}</span><div class="gloss hidden"></div></div>`).join('');
   document.querySelectorAll('#b1Lines .line').forEach(l => {
     const i = +l.dataset.i;
     l.querySelector('.el').onclick = ev => {
@@ -520,7 +532,7 @@ $('b1Next').onclick = () => { stop(); $('b1').classList.add('hidden'); $('b2').c
 function renderB2() {
   document.querySelectorAll('#inMode button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.i === G.input)));
   const text = G.input === 'text';
-  $('b2Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line"><span>${esc(P[i].ru)}</span>${text ? `<textarea id="in-${i}" lang="${esc(M.lang || 'el')}" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(P[i].ru)}"></textarea>` : ''}</div>`).join('');
+  $('b2Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line"><span class="ru">${esc(P[i].ru)}</span>${text ? `<textarea id="in-${i}" lang="${esc(M.lang || 'el')}" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(P[i].ru)}"></textarea>` : ''}</div>`).join('');
   $('b2Next').textContent = text ? 'Сверить' : 'Сказал(а) — сверить';
   $('b2Hint').textContent = 'Скажите ' + LG(M).say;
 }
@@ -626,7 +638,7 @@ function renderB3(answers) {
     const p = P[i], a = answers[i];
     const d = a ? diff(a, TX(p), M.lang) : null;
     return `<div class="cmp" data-i="${i}">
-      <span class="small muted">${esc(p.ru)}</span>
+      <span class="ru">${esc(p.ru)}</span>
       ${a ? `<span class="el you">${d.u}</span>` : ''}
       <span class="el">${d ? d.o : esc(TX(p))}</span>
       <div class="colors sm"><button class="g" data-c="g" aria-pressed="false">Знаю</button><button class="y" data-c="y" aria-pressed="false">Повторить</button><button class="r" data-c="r" aria-pressed="false">Трудно</button></div>
