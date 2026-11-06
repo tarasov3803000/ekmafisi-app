@@ -1,6 +1,6 @@
 /* Экмафиси — service worker. Оболочка (страница, код, значки, шрифты) — в кэш при установке, отдаётся из кэша.
    Тексты, словарь и звук сюда не попадают: их кладёт в свой кэш сама страница (sync.js) после входа. */
-const VERSION = 'a8b6e523f0';  /* tools/app.py site ставит сюда отпечаток файлов оболочки */
+const VERSION = '0bb40246cd';  /* tools/app.py site ставит сюда отпечаток файлов оболочки */
 const SHELL = 'ekmafisi-shell-' + VERSION;
 const FILES = ['./', 'index.html', 'app.js', 'sync.js', 'config.js', 'vendor/supabase.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];

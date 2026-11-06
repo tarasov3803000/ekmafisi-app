@@ -894,7 +894,7 @@ const LADDER = [
 ];
 const ladderOf = k => LADDER.find(x => x.k === k) || LADDER[0];
 const SBKEY = 'ekmafisi.soberi', SBCKEY = 'ekmafisi.soberi.chains';
-let SB = Object.assign({ step: 'И1', opora: true, played: [], flags: {} }, read(SBKEY) || {});
+let SB = Object.assign({ step: 'И1', opora: true, played: [], flags: {}, mine: {} }, read(SBKEY) || {});
 const saveSB = () => { write(SBKEY, SB); setSynced('soberi', SB); };
 setSynced('soberi', SB);
 let SBSTART = null;  /* первый пакет */
@@ -966,7 +966,8 @@ function goRender() {
   } else if (!final) {  /* первая ошибка: свои неверные слова подчёркнуты, намёк, верного ответа нет */
     $('gSlot').innerHTML = `<div class="cmp"><span class="el you">${r.d.words.map(w => w.e || w.extra ? `<span class="und">${esc(w.w)}</span>` : esc(w.w)).join(' ')}</span></div>`;
   } else {
-    $('gSlot').innerHTML = `<div class="cmp"><span class="el you">${r.d.u}</span><span class="el">${r.d.o}</span><span class="grade ${go.grades[go.q[go.k]] || r.g}">${GRADE_LBL[go.grades[go.q[go.k]] || r.g]}</span></div>`;
+    $('gSlot').innerHTML = `<div class="cmp"><span class="el you">${r.d.u}</span><span class="el">${r.d.o}</span><span class="grade ${go.grades[go.q[go.k]] || r.g}">${GRADE_LBL[go.grades[go.q[go.k]] || r.g]}</span></div>`
+      + (r.alt && r.g === 'g' ? `<p class="muted">Другой порядок слов — тоже верно. Эталон: ${esc(it.el[0])}</p>` : '');
   }
   $('gHint').classList.toggle('hidden', !(r && !final));
   if (r && !final) {
@@ -980,24 +981,105 @@ function goRender() {
   $('gNoVoice').classList.toggle('hidden', !(final && !elVoice()));
   $('gS3').classList.toggle('hidden', !r);
   $('gOn').classList.toggle('hidden', !final || r.g === 'r');  /* «не знаю» — только «Ещё раз» */
-  $('gMine').classList.toggle('hidden', !(final && r.g !== 'g'));
+  $('gMine').classList.toggle('hidden', !(r && r.g !== 'g' && r.a));
   $('gJudge').classList.add('hidden');
   $('gFlagBox').classList.add('hidden');
   $('gFlag').textContent = 'Неверно?';
   paintSpeed(); paintOwner();
 }
-/* сверка с ближайшим из вариантов: меньше оценка, потом меньше ошибок */
-function sbBest(a, it) {
+/* Порядок слов в греческом свободный («Πάντα φεύγει η τέλεια στιγμή» = «Η τέλεια στιγμή πάντα φεύγει», 7 ноября 2026).
+   Эталон el[0] режется по разметке words на части: именная группа (предлог, указательное, артикль, прилагательные,
+   существительное, слабое притяжательное после него), глагол с δεν/μην/θα/να и слабыми местоимениями, наречие (наречие
+   перед прилагательным, наречием или предлогом — с ними), прочее по слову. Части переставляются во все порядки.
+   Не переставляем: вопрос, запятую, союз, больше одного глагола, больше 6 частей. Две именные группы без предлога
+   меняются местами, только если артикли у них разные (το σκυλί … το παιδί — кто кого, по форме не понять). */
+const sbPlain = s => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/ς/g, 'σ');
+const SB_PT = new Set(['δεν', 'δε', 'μην', 'μη', 'θα', 'να']), SB_STOP = new Set(['και', 'αλλα', 'που', 'οτι', 'οταν', 'γιατι', 'αν', 'πωσ', 'ποτε', 'τι', 'ποιοσ', 'ομωσ', 'η']);
+function sbKind(w) {
+  const g = w.g || '', l = sbPlain(w.l || '');
+  if (/^предл/.test(g) || /\+/.test(w.l || '')) return 'prep';
+  if (/^артикль/.test(g)) return 'art';
+  if (/^частиц|^част\./.test(g) || SB_PT.has(l)) return 'pt';
+  if (/союз|вопр|относ/.test(g) || (SB_STOP.has(l) && !/^артикль/.test(g))) return 'stop';
+  if (/слаб/.test(g)) return 'cl';
+  if (/^сущ/.test(g)) return 'n';
+  if (/^прил|указ|^числ|притяж/.test(g)) return 'adj';
+  if (/^нареч/.test(g)) return 'adv';
+  if (/^гл|наст|аор|буд|παρατ|повел|сосл/.test(g)) return 'v';
+  return 'x';
+}
+const SB_ORD = new Map();
+function sbOrders(it) {
+  const src = it.el[0] || '', key = src + '|' + JSON.stringify(it.words || []);
+  if (SB_ORD.has(key)) return SB_ORD.get(key);
+  const out = [], W = it.words || [];
+  SB_ORD.set(key, out);
+  if (W.length < 2 || /[;;,·]/.test(src) || tok(src).length !== W.flatMap(w => tok(w.t)).length) return out;
+  const K = W.map(sbKind);
+  if (K.includes('stop') || K.filter(k => k === 'v').length !== 1) return out;
+  const grp = new Array(W.length).fill(-1); let ng = 0;
+  // именные группы: предлог, артикль, прилагательное, существительное подряд; новое начало — артикль или предлог после существительного
+  for (let i = 0; i < W.length; i++) {
+    const nom = k => k === 'prep' || k === 'art' || k === 'adj' || k === 'n';
+    if (!nom(K[i])) continue;
+    const g = ng++; let seenN = false;
+    for (; i < W.length && nom(K[i]); i++) {
+      // после существительного новая группа — с артикля или предлога; родительный (τα κλαδιά του δέντρου) остаётся при нём
+      if (seenN && (K[i] === 'art' || K[i] === 'prep') && !(K[i] === 'art' && /род\.\s*(ед|мн)/.test(W[i].g || ''))) break;
+      grp[i] = g; if (K[i] === 'n') seenN = true;
+    }
+    if (i < W.length && seenN && K[i] === 'cl') grp[i++] = g;  // ο σκύλος μου
+    if (i < W.length && !seenN && K[i] === 'adv' && K[i - 1] === 'prep') grp[i++] = g;  // από πάνω
+    i--;
+  }
+  // глагол с частицами и слабыми местоимениями до и после
+  const v = K.indexOf('v'), gv = ng++; grp[v] = gv;
+  for (let j = v - 1; j >= 0 && grp[j] < 0 && (K[j] === 'pt' || K[j] === 'cl'); j--) grp[j] = gv;
+  for (let j = v + 1; j < W.length && grp[j] < 0 && K[j] === 'cl'; j++) grp[j] = gv;
+  if (K.some((k, j) => (k === 'pt' || k === 'cl') && grp[j] < 0)) return out;  // частица не у глагола — не трогаем
+  // наречие перед прилагательным, наречием или предлогом — с ним; остальное — по слову
+  for (let j = W.length - 1; j >= 0; j--) if (grp[j] < 0) grp[j] = K[j] === 'adv' && j + 1 < W.length && ['adj', 'adv', 'prep'].includes(K[j + 1]) ? grp[j + 1] : ng++;
+  const parts = []; grp.forEach((g, j) => { if (j && grp[j - 1] === g) parts[parts.length - 1].push(j); else parts.push([j]); });
+  if (parts.length < 2 || parts.length > 6 || new Set(grp).size !== parts.length) return out;
+  // именные части без предлога: ключ — артикль; две без артикля или с одинаковым артиклем меняться местами не могут
+  const nomKey = p => { const k0 = K[p[0]]; if (k0 === 'prep' || !p.some(j => K[j] === 'n' || K[j] === 'adj' || K[j] === 'x')) return undefined; return k0 === 'art' ? sbPlain(W[p[0]].t) : null; };
+  const keys = parts.map(nomKey), proper = j => /собств/.test(W[j].g || '');
+  const end = (src.match(/[.!…]+\s*$/) || [''])[0].trim();
+  const perm = (rest, acc) => {
+    if (!rest.length) {
+      for (let a = 0; a < acc.length; a++) for (let b = a + 1; b < acc.length; b++) {
+        const ka = keys[acc[a]], kb = keys[acc[b]];
+        if (acc[a] > acc[b] && ka !== undefined && kb !== undefined && (ka === null || kb === null || ka === kb)) return;
+      }
+      if (acc.every((p, k) => p === k)) return;
+      const ws = acc.flatMap(p => parts[p]).map((j, k) => {
+        let t = W[j].t;
+        if (j === 0 && !proper(j)) t = t.charAt(0).toLowerCase() + t.slice(1);
+        return k === 0 ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+      });
+      out.push(ws.join(' ') + end);
+      return;
+    }
+    rest.forEach((p, k) => perm(rest.filter((_, q) => q !== k), [...acc, p]));
+  };
+  perm(parts.map((_, k) => k), []);
+  return out;
+}
+/* сверка с ближайшим: эталоны, их перестановки и признанные «Моё тоже верно?»; меньше оценка, потом меньше ошибок, при равенстве — эталон */
+function sbBest(a, it, cid) {
+  const mine = ((SB.mine || {})[cid] || {})[it.n] || [];
+  const cand = [...new Set([...it.el, ...mine, ...sbOrders(it)])];
   let best = null;
-  it.el.forEach(v => { const d = diff(a, v, 'el'), sc = 'gyr'.indexOf(d.g) * 1000 + d.err; if (!best || sc < best.sc) best = { d, v, sc }; });
+  cand.forEach(v => { const d = diff(a, v, 'el'), sc = 'gyr'.indexOf(d.g) * 1000 + d.err; if (!best || sc < best.sc) best = { d, v, sc }; });
+  best.alt = !it.el.includes(best.v);
   return best;
 }
 $('gOpora').onclick = () => { SB.opora = !SB.opora; saveSB(); const keep = $('gIn') && $('gIn').value; goRender(); if (keep && $('gIn')) $('gIn').value = keep; };
 $('gCheck').onclick = () => {
   const k = go.q[go.k], it = go.chain.items[k], a = $('gIn').value.trim();
-  const b = a ? sbBest(a, it) : { d: diff('', it.el[0], 'el'), v: it.el[0] };
+  const b = a ? sbBest(a, it, go.chain.id) : { d: diff('', it.el[0], 'el'), v: it.el[0] };
   go.tries++;
-  go.res = { a, d: b.d, v: b.v, g: a ? b.d.g : 'r' };
+  go.res = { a, d: b.d, v: b.v, alt: !!b.alt, g: a ? b.d.g : 'r' };
   if (go.tries === 1 && go.res.g === 'g') sbMark(k, 'g', a);
   else if (go.tries === 2) sbMark(k, go.res.g === 'g' ? 'y' : 'r', a);
   goRender();
@@ -1052,7 +1134,14 @@ $('gMine').onclick = async () => {
   try {
     const r = await EK.fn({ action: 'judge', ru: it.ru, answer: go.res.a, variants: it.el });
     $('gJudge').textContent = (r.ok ? 'Верно. ' : 'Неверно. ') + (r.note || '');
-    if (r.ok) { it.el.push(go.res.a); go.grades[k] = null; sbMark(k, go.tries <= 1 ? 'g' : 'y', go.res.a); $('gOn').classList.remove('hidden'); $('gMine').classList.add('hidden'); }
+    if (r.ok) {  /* признанный вариант запоминается в настройках (синхронно на всех устройствах) — сверка примет его и в следующий раз */
+      const m = ((SB.mine = SB.mine || {})[go.chain.id] = SB.mine[go.chain.id] || {});
+      m[it.n] = [...new Set([...(m[it.n] || []), go.res.a])]; saveSB();
+      const note = $('gJudge').textContent;
+      go.grades[k] = null; sbMark(k, go.tries <= 1 ? 'g' : 'y', go.res.a);
+      go.res = { ...go.res, d: diff(go.res.a, go.res.a, 'el'), v: go.res.a, alt: false, g: 'g' };
+      goRender(); $('gJudge').classList.remove('hidden'); $('gJudge').textContent = note;
+    }
   } catch (e) { $('gJudge').textContent = EK.DEV ? 'В режиме проверки без входа ИИ не спрашиваем.' : navigator.onLine ? 'Не вышло спросить — попробуйте позже.' : 'Нет сети.'; }
 };
 /* голос телефона: synthesis el-GR; скорость — та же лесенка */
