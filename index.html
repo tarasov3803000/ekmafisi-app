@@ -99,6 +99,19 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .text.last { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
 .resume { display: grid; gap: 2px; text-align: left; }
 .resume small { opacity: .85; font-weight: 400; }
+.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tools .btn { display: grid; gap: 0; text-align: left; font-variant-numeric: tabular-nums; }
+.tools .btn small { font-weight: 400; color: var(--muted); font-size: calc(13px + var(--up)); }
+/* «Слова»: первая тысяча частотных лемм — освоенные зелёные, встреченные в текстах обведены, прочие бледные */
+.wstat { display: grid; gap: 2px; }
+.wstat b { font: 600 calc(26px + var(--up))/1.2 var(--f-el); }
+.wgrid { display: flex; flex-wrap: wrap; gap: 6px; }
+.wgrid button { font: calc(15px + var(--up))/1.2 var(--f-el); border: 1.5px solid transparent; background: none; color: var(--muted); opacity: .55; border-radius: 8px; padding: 3px 7px; }
+.wgrid button.seen { border-color: var(--accent); color: var(--ink); opacity: 1; }
+.wgrid button.ok { background: var(--g-soft); border-color: var(--g); color: var(--ink); opacity: 1; }
+.wleg { display: flex; gap: 14px; flex-wrap: wrap; font-size: calc(13px + var(--up)); color: var(--muted); }
+.wleg i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--line); margin-right: 5px; vertical-align: -1px; }
+.wleg i.ok { background: var(--g-soft); border-color: var(--g); } .wleg i.seen { border-color: var(--accent); }
 
 /* текст */
 .meta { display: grid; gap: 6px; }
@@ -204,6 +217,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 /* ряд кнопок занятия — все одного размера: ✓ · < · ▶ со скоростью внутри · > · глаз («Обратный перевод» — без ✓) */
 .ctl { display: flex; justify-content: space-between; max-width: 380px; width: 100%; margin: 0 auto; }
 .ctl.c4 { max-width: 300px; }
+.ctl.c1 { justify-content: center; }
 .ic { width: 64px; height: 64px; border: 0; background: none; color: var(--accent); display: inline-grid; place-items: center; border-radius: 16px; padding: 0; position: relative; }
 .ic:active { background: var(--accent-soft); }
 .ic:disabled { opacity: .3; cursor: default; }
@@ -248,6 +262,10 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <p class="small muted">Сменить можно в настройках. Прогресс каждого языка хранится свой.</p>
   </section>
   <button class="btn primary wide resume hidden" id="resume" style="min-height:64px"></button>
+  <div class="tools hidden" id="shelfTools">
+    <button class="btn" id="chkOpen"></button>
+    <button class="btn" id="wordsOpen"></button>
+  </div>
   <section class="shelf" id="shelfList">
     <h2>Тексты</h2>
     <div class="shelf" id="texts"></div>
@@ -358,6 +376,27 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <button class="btn primary wide hidden" id="bCheck">Сверить</button>
     <div class="row hidden" id="bS3"><button class="btn" id="bAgain" style="flex:1">Ещё раз</button><button class="btn primary" id="bOn" style="flex:1">Дальше</button></div>
   </section>
+</main>
+
+<main id="check" class="hidden">
+  <div class="bar"><span class="ttl">Проверка</span><span class="cnt" id="cCnt"></span></div>
+  <p class="sub" id="cSub"></p>
+  <section class="card">
+    <p class="small muted" id="cSrc"></p>
+    <div class="line"><span class="ru" id="cRu"></span><div class="slot" id="cSlot"></div></div>
+    <button class="btn primary wide" id="cCheck">Сверить</button>
+    <div class="ctl c1 hidden" id="cPlayRow"><button class="ic play" id="cPlay" aria-label="Слушать"></button></div>
+    <div class="row hidden" id="cS3"><button class="btn" id="cAgain" style="flex:1">Ещё раз</button><button class="btn primary" id="cOn" style="flex:1">Дальше</button></div>
+  </section>
+  <p class="muted hidden" id="cDone">Проверять больше нечего — до завтра.</p>
+</main>
+
+<main id="words" class="hidden">
+  <div class="bar"><span class="ttl">Слова</span></div>
+  <div class="wstat"><b id="wN"></b><span class="muted" id="wTop"></span></div>
+  <div class="wleg"><span><i class="ok"></i>освоено</span><span><i class="seen"></i>встречалось в текстах</span><span><i></i>ещё нет</span></div>
+  <p class="loading hidden" id="wLoad">Загружаю частотный список…</p>
+  <div class="wgrid" id="wGrid"></div>
 </main>
 
 <section id="etym" class="sheet hidden" role="dialog" aria-label="Происхождение слова">

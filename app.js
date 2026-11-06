@@ -186,11 +186,12 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
-  ['shelf', 'settings', 'home', 'skor', 'bt'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  ['shelf', 'settings', 'home', 'skor', 'bt', 'check', 'words'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0);
   if (id === 'shelf') { if (window.EK_UPDATE) return location.reload(); renderShelf(); }
   if (id === 'home') renderHome();
   if (id === 'settings') renderSettings();
+  if (id === 'words') renderWords();
 }
 const shown = id => !$(id).classList.contains('hidden');
 
@@ -206,13 +207,14 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
   else { history.replaceState({ d: 0, sheet: null }, '', urlOf(fallback)); applyLoc(); }
 }
 function parseHash(h) {
-  if (h === 'settings') return { v: 'settings' };
+  if (h === 'settings' || h === 'check' || h === 'words') return { v: h };
   for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
   return LIB.some(m => m.id === h) ? { v: 'home', id: h } : { v: 'shelf' };
 }
 function applyLoc(force) {  /* force — первый вход: экран рисуется, даже если уже виден */
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
-  if (t.v === 'shelf' || t.v === 'settings') { if (force || !shown(t.v)) show(t.v); }
+  if (t.v === 'shelf' || t.v === 'settings' || t.v === 'words') { if (force || !shown(t.v)) show(t.v); }
+  else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
   else {
     const fresh = !M || M.id !== t.id;
     if (fresh) setText(t.id);
@@ -241,6 +243,14 @@ function renderShelf() {
   }).join('');
   document.querySelectorAll('#texts .text').forEach(b => b.onclick = () => openText(b.dataset.id));
   const last = LIB.find(m => m.id === lastId());
+  /* «Проверка · N» — фразы, которым подошёл срок, со всех текстов языка; «Слова» — сколько освоено */
+  $('shelfTools').classList.toggle('hidden', !G.lang);
+  if (G.lang) {
+    const n = dueList().length, w = wordStats();
+    $('chkOpen').innerHTML = `<span>Проверка · ${n}</span><small>${n ? 'пора проверить' : 'на сегодня всё'}</small>`;
+    $('chkOpen').disabled = !n;
+    $('wordsOpen').innerHTML = `<span>Слова · ${w.ok}</span><small>освоено</small>`;
+  }
   $('resume').classList.toggle('hidden', !last);
   if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(last.title)}</small>`;
 }
@@ -266,10 +276,10 @@ document.querySelectorAll('#setBig button').forEach(b => b.onclick = () => {
 paintBig();
 document.querySelectorAll('#setTheme button').forEach(b => b.onclick = () => { G.theme = b.dataset.t; saveG(); paintTheme(); renderSettings(); });
 
-function setText(id) {
+function setText(id, quiet) {  /* quiet — для «Проверки»: текст нужен, «Продолжить» не трогаем */
   const m = LIB.find(x => x.id === id);
-  M = m; P = m.phrases; CHUNKS = m.chunks; S = progOf(m);
-  G['last.' + (m.lang || 'el')] = m.id; saveG();
+  if (M !== m) { M = m; P = m.phrases; CHUNKS = m.chunks; S = progOf(m); }
+  if (!quiet) { G['last.' + (m.lang || 'el')] = m.id; saveG(); }
   loadAudio(m); loadLex(m);
 }
 function openText(id) { setText(id); push(id); show('home'); }
@@ -390,7 +400,7 @@ function openEtym(l) {
 }
 function openSheet(sh) {
   sheetNow = sh; $('etym').scrollTop = 0;
-  sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : renderEtym(sh.l);
+  sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : sh.k === 'word' ? renderWord(sh.l) : renderEtym(sh.l);
   $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
 }
 function closeSheet() { sheetNow = null; $('etym').classList.add('hidden'); document.body.style.overflow = ''; }
@@ -727,6 +737,138 @@ function diff(user, orig, lang) {
   const worst = Math.max(0, ...gw, ...okU.map(v => v ? 0 : 2));
   return { u: U.join(' '), o: O.join(' '), g: ['g', 'y', 'r'][worst] };
 }
+/* --- FSRS (FSRS-5, веса по умолчанию): состояние фразы пересчитывается из журнала — схема базы не меняется ---
+   Оценка: сверка письма (bt, check; прежние bt-письмо, bt-голос) — не знаю → Again, с трудом → Hard, знаю → Good; «выучено» → Easy.
+   ✓ «пройдено» в «Повторении» (и прежняя «Скороговорка») оценки не ставит: новая фраза получает срок — следующий день.
+   Освоена — стабильность ≥ 21 дня. */
+const FW = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
+const F_DECAY = -0.5, F_FACTOR = 19 / 81, MASTER = 21, DAY = 864e5;
+const RATING = { r: 1, y: 2, g: 3 };
+const clampD = d => Math.min(10, Math.max(1, d));
+const d0 = g => clampD(FW[4] - Math.exp(FW[5] * (g - 1)) + 1);
+const tOf = x => Date.parse(x.t + (x.t.length === 16 ? ':00Z' : ''));
+const dayOf = ms => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d; };
+const addDays = (ms, n) => { const d = dayOf(ms); d.setDate(d.getDate() + n); return d.getTime(); };
+function fsrsStep(c, g, t) {
+  if (c.s === null) { c.s = FW[g - 1]; c.d = d0(g); }
+  else {
+    const days = (t - c.last) / DAY;
+    if (dayOf(t).getTime() === dayOf(c.last).getTime()) c.s = c.s * Math.exp(FW[17] * (g - 3 + FW[18]));  /* в тот же день */
+    else {
+      const R = Math.pow(1 + F_FACTOR * days / c.s, F_DECAY);
+      c.s = g === 1
+        ? Math.min(c.s, FW[11] * Math.pow(c.d, -FW[12]) * (Math.pow(c.s + 1, FW[13]) - 1) * Math.exp(FW[14] * (1 - R)))
+        : c.s * (1 + Math.exp(FW[8]) * (11 - c.d) * Math.pow(c.s, -FW[9]) * (Math.exp(FW[10] * (1 - R)) - 1) * (g === 2 ? FW[15] : 1) * (g === 4 ? FW[16] : 1));
+    }
+    const dd = c.d + (-FW[6] * (g - 3)) * (10 - c.d) / 9;
+    c.d = clampD(FW[7] * d0(4) + (1 - FW[7]) * dd);
+  }
+  c.last = t; c.reps++;
+  c.due = addDays(t, g === 1 ? 1 : Math.max(1, Math.round(c.s)));  /* удержание 0,9: интервал = стабильность */
+}
+/* карточки текста: { фраза: { s, d, last, due, reps } } — по журналу, «unlearn» снимает последнее «выучено» */
+function cardsOf(s) {
+  const ev = s.log.filter(x => x.p && x.t).slice().sort((a, b) => a.t.localeCompare(b.t));
+  const drop = new Set();
+  ev.forEach((x, k) => { if (x.m === 'unlearn') { for (let j = k - 1; j >= 0; j--) if (ev[j].p === x.p && ev[j].m === 'learned' && !drop.has(j)) { drop.add(j); break; } } });
+  const C = {};
+  ev.forEach((x, k) => {
+    if (drop.has(k) || x.m === 'unlearn') return;
+    const t = tOf(x); if (!t) return;
+    const c = C[x.p] || (C[x.p] = { s: null, d: null, last: 0, due: 0, reps: 0 });
+    if (x.m === 'learned') fsrsStep(c, 4, t);
+    else if (x.m === 'povt' || x.m === 'skor') { if (c.s === null && !c.due) c.due = addDays(t, 1); }
+    else if (RATING[x.c]) fsrsStep(c, RATING[x.c], t);
+  });
+  return C;
+}
+const stateOf = m => (M === m ? S : progOf(m));
+const langTexts = () => LIB.filter(m => m.lang === G.lang);
+/* фразы, которым подошёл срок: сначала давние */
+function dueList() {
+  const today = dayOf(Date.now()).getTime(), out = [];
+  langTexts().forEach(m => { const C = cardsOf(stateOf(m)); m.phrases.forEach((p, i) => { const c = C[p.id]; if (c && c.due && c.due <= today) out.push({ id: m.id, i, due: c.due }); }); });
+  return out.sort((a, b) => a.due - b.due);
+}
+/* освоенные фразы и слова: слово освоено, если оно есть в освоенной фразе */
+function wordStats() {
+  const ok = new Set(), seen = new Set();
+  langTexts().forEach(m => {
+    const C = cardsOf(stateOf(m));
+    m.phrases.forEach(p => { const good = C[p.id] && C[p.id].s >= MASTER; p.words.forEach(w => { if (!w.l) return; seen.add(w.l); if (good) ok.add(w.l); }); });
+  });
+  return { ok: ok.size, okSet: ok, seen };
+}
+
+/* --- «Проверка · N»: русский → поле → «Сверить»; оценка и кнопки — как в «Обратном переводе» --- */
+let ck = { q: [], k: 0, tries: 0, res: null };
+$('chkOpen').onclick = () => { push('check'); checkOpen(); };
+function checkOpen() { show('check'); ck = { q: dueList(), k: 0, tries: 0, res: null }; checkRender(); }
+function checkRender() {
+  const done = ck.k >= ck.q.length;
+  $('cDone').classList.toggle('hidden', !done);
+  document.querySelector('#check .card').classList.toggle('hidden', done);
+  $('cCnt').textContent = done ? '' : `${ck.k + 1} / ${ck.q.length}`;
+  if (done) { $('cSub').textContent = ''; return; }
+  const it = ck.q[ck.k]; setText(it.id, true);
+  const p = P[it.i];
+  $('cSub').textContent = `Переведите фразу ${LG(M).to}`;
+  $('cSrc').textContent = M.title;
+  $('cRu').textContent = p.ru;
+  const res = ck.res;
+  if (!res) {
+    $('cSlot').innerHTML = `<textarea id="cIn" lang="${esc(M.lang || 'el')}" rows="2" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(p.ru)}"></textarea>`;
+    if (ck.keep) $('cIn').value = ck.keep;
+  } else $('cSlot').innerHTML = `<div class="cmp">${res.a ? `<span class="el you">${res.d.u}</span>` : ''}<span class="el">${res.a ? res.d.o : `<span class="miss">${esc(TX(p))}</span>`}</span><span class="grade ${res.g}">${GRADE_LBL[res.g]}</span></div>`;
+  $('cCheck').classList.toggle('hidden', !!res);
+  $('cPlayRow').classList.toggle('hidden', !res);
+  $('cS3').classList.toggle('hidden', !res);
+  if (res) $('cOn').classList.toggle('hidden', res.g === 'r');
+  paintOwner(); paintSpeed();
+}
+$('cCheck').onclick = () => {
+  const it = ck.q[ck.k], p = P[it.i], a = $('cIn').value.trim();
+  const d = a ? diff(a, TX(p), M.lang) : null;
+  ck.res = { a, d, g: d ? d.g : 'r' };
+  if (!ck.tries) { if (a) S.written[p.id] = a; mark(it.i, ck.res.g, 'check'); }  /* оценка — по первой попытке */
+  ck.tries++; ck.keep = null; checkRender();
+};
+$('cAgain').onclick = () => { stop(); ck.keep = ck.res.g === 'g' ? ck.res.a : ''; ck.res = null; checkRender(); $('cIn').focus({ preventScroll: true }); };
+$('cOn').onclick = () => { stop(); ck.k++; ck.tries = 0; ck.res = null; ck.keep = null; checkRender(); window.scrollTo(0, 0); };
+$('cPlay').onclick = () => toggle($('cPlay'), () => playBy($('cPlay'), ck.q[ck.k].i, G.rate));
+
+/* --- «Слова»: сверху — сколько освоено; ниже первая тысяча частотных лемм языка (material/<lang>/chastoty) --- */
+let FREQ = {};
+$('wordsOpen').onclick = () => { push('words'); show('words'); };
+function renderWords() {
+  const w = wordStats(), lang = G.lang || 'el';
+  langTexts().forEach(loadLex);  /* значения и происхождение — из словарей всех текстов языка */
+  $('wN').textContent = `Освоено ${w.ok} ${plural(w.ok, 'слово', 'слова', 'слов')}`;
+  const draw = list => {
+    const top = list.slice(0, 1000), okTop = top.filter(x => w.okSet.has(x.lemma)).length;
+    $('wTop').textContent = `из первой тысячи — ${Math.round(okTop / 10)} %` + (okTop && okTop < 10 ? ` (${okTop})` : '');
+    $('wGrid').innerHTML = top.map(x => `<button class="${w.okSet.has(x.lemma) ? 'ok' : w.seen.has(x.lemma) ? 'seen' : ''}" data-word="${esc(x.lemma)}">${esc(x.lemma)}</button>`).join('');
+  };
+  if (FREQ[lang]) return draw(FREQ[lang]);
+  $('wTop').textContent = ''; $('wGrid').innerHTML = ''; $('wLoad').classList.remove('hidden');
+  EK.content(lang + '/chastoty.json', navigator.onLine).then(r => r.json()).then(d => { FREQ[lang] = d.lemmas; $('wLoad').classList.add('hidden'); if (shown('words')) draw(d.lemmas); })
+    .catch(() => { $('wLoad').textContent = 'Частотного списка для этого языка пока нет.'; });
+}
+const POS_RU = { NOUN: 'существительное', VERB: 'глагол', ADJ: 'прилагательное', ADV: 'наречие', PRON: 'местоимение', DET: 'артикль, определитель', ADP: 'предлог', CCONJ: 'союз', SCONJ: 'союз', NUM: 'числительное', PART: 'частица', INTJ: 'междометие', AUX: 'вспомогательный глагол', PROPN: 'имя собственное' };
+function renderWord(l) {
+  const x = (FREQ[G.lang || 'el'] || []).find(y => y.lemma === l) || { lemma: l };
+  const L = lexOf(l) || {}, D = LEX[l], p = phraseOf(l), w = wordStats();
+  $('eTtl').textContent = 'Слово';
+  const st = w.okSet.has(l) ? 'освоено' : w.seen.has(l) ? 'встречалось в текстах' : 'в текстах пока не встречалось';
+  $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(x.slovo || l)}</span>
+      ${L.ru || D ? `<span>${esc(cap(L.ru || D.dict.senses[0]?.ru || ''))}</span>` : ''}
+      <span class="small muted">${x.rank ? `№ ${x.rank} по частоте · ` : ''}${esc(POS_RU[x.pos] || '')}${x.pos ? ' · ' : ''}${st}</span>
+      ${x.forms ? `<span class="el muted">${esc(x.forms.join(' · '))}</span>` : ''}
+      ${p ? `<span class="small muted"><span class="el">${esc(TX(p))}</span><br>${esc(p.ru)}</span>` : ''}</div>
+    ${D && D.dict.senses.length ? `<div class="gl-links"><button class="link" data-senses="${esc(l)}">Значения</button>${D.etym ? `<span class="muted">·</span><button class="link" data-etym="${esc(l)}">Происхождение</button>` : ''}</div>` : ''}`;
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-word]'); if (b) { push(curHash(), { k: 'word', l: b.dataset.word }); openSheet(history.state.sheet); } });
+
 /* --- тема: авто (как в системе) · светлая · тёмная --- */
 const THEMES = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
 function paintTheme() {
