@@ -99,6 +99,16 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .text.last { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
 .resume { display: grid; gap: 2px; text-align: left; }
 .resume small { opacity: .85; font-weight: 400; }
+.soberi-card .t { font: 600 calc(21px + var(--up))/1.2 var(--f-el); }
+.steps { display: grid; gap: 8px; }
+.steps button { text-align: left; display: grid; grid-template-columns: 2.6em 1fr auto; gap: 2px 10px; align-items: baseline; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.steps button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.steps b { font-variant-numeric: tabular-nums; color: var(--accent); }
+.steps .ex { grid-column: 2 / 4; font-family: var(--f-el); color: var(--muted); font-size: calc(14px + var(--up)); }
+.steps .n { font-size: calc(13px + var(--up)); color: var(--muted); font-variant-numeric: tabular-nums; }
+.blocks { display: flex; flex-wrap: wrap; gap: 6px 14px; font: calc(18px + var(--up))/1.4 var(--f-el); color: var(--muted); }
+.und { text-decoration: underline wavy var(--r); text-underline-offset: 4px; }
+.sbhint { display: grid; gap: 4px; font-size: calc(15px + var(--up)); }
 .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tools .btn { display: grid; gap: 0; text-align: left; font-variant-numeric: tabular-nums; }
 .tools .btn small { font-weight: 400; color: var(--muted); font-size: calc(13px + var(--up)); }
@@ -266,6 +276,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <button class="btn" id="chkOpen"></button>
     <button class="btn" id="wordsOpen"></button>
   </div>
+  <button class="text soberi-card hidden" id="sbCard"></button>
   <section class="shelf" id="shelfList">
     <h2>Тексты</h2>
     <div class="shelf" id="texts"></div>
@@ -397,6 +408,42 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <div class="wleg"><span><i class="ok"></i>освоено</span><span><i class="seen"></i>встречалось в текстах</span><span><i></i>ещё нет</span></div>
   <p class="loading hidden" id="wLoad">Загружаю частотный список…</p>
   <div class="wgrid" id="wGrid"></div>
+</main>
+
+<main id="soberi" class="hidden">
+  <div class="bar"><span class="ttl">Собери</span></div>
+  <p class="sub">Соберите фразу из знакомых слов — окончания, артикль и порядок слов строите сами</p>
+  <div class="steps" id="sbSteps"></div>
+  <p class="small muted" id="sbStock"></p>
+</main>
+
+<main id="sbgo" class="hidden">
+  <div class="bar"><span class="ttl" id="gTtl">Собери</span><span class="cnt" id="gCnt"></span></div>
+  <section class="card">
+    <p class="ru-line" id="gRu" style="color:var(--ink)"></p>
+    <div class="blocks" id="gBlocks"></div>
+    <button class="link small" id="gOpora" style="justify-self:start"></button>
+    <div class="slot" id="gSlot"></div>
+    <div class="sbhint hidden" id="gHint"></div>
+    <button class="btn primary wide" id="gCheck">Сверить</button>
+    <div class="ctl c4 hidden" id="gPlayRow">
+      <button class="ic slower" aria-label="Медленнее"></button>
+      <button class="ic play" id="gPlay" aria-label="Слушать"></button>
+      <button class="ic faster" aria-label="Быстрее"></button>
+    </div>
+    <p class="small muted hidden" id="gNoVoice">На этом устройстве нет греческого голоса — шаг без звука.</p>
+    <div class="row hidden" id="gS3"><button class="btn" id="gAgain" style="flex:1">Ещё раз</button><button class="btn primary" id="gOn" style="flex:1">Дальше</button></div>
+    <div class="row" style="justify-content:space-between">
+      <button class="link small hidden" id="gMine">Моё тоже верно?</button>
+      <button class="link small" id="gFlag" style="margin-left:auto">Неверно?</button>
+    </div>
+    <p class="small muted hidden" id="gJudge"></p>
+    <div id="gFlagBox" class="hidden" style="display:grid;gap:8px"><textarea id="gFlagText" placeholder="Что не так — коротко"></textarea><button class="btn" id="gFlagSave">Сохранить — шаг уйдёт из запаса</button></div>
+  </section>
+  <section class="card hidden" id="gEnd">
+    <p class="hint" id="gEndTxt">Цепочка пройдена.</p>
+    <div class="row"><button class="btn" id="gExit" style="flex:1">Выйти</button><button class="btn primary" id="gMore" style="flex:1">Ещё</button></div>
+  </section>
 </main>
 
 <section id="etym" class="sheet hidden" role="dialog" aria-label="Происхождение слова">

@@ -105,6 +105,20 @@
     }
   }
   EK.sync = sync;
+  /* «Собери»: цепочки человека (таблица soberi_chains) и функция soberi — пополнить запас, «Моё тоже верно?» */
+  EK.chains = async () => {
+    if (DEV || !navigator.onLine) return null;
+    const { data, error } = await sb.from('soberi_chains').select('id,lang,step,chain,state,created_at').eq('state', 'ready').order('created_at').limit(200);
+    if (error) throw error;
+    return data;
+  };
+  EK.chainState = (id, state) => DEV ? Promise.resolve() : sb.from('soberi_chains').update({ state }).eq('id', id).then(({ error }) => { if (error) throw error; });
+  EK.fn = async (body) => {
+    if (DEV) throw new Error('dev');
+    const { data, error } = await sb.functions.invoke('soberi', { body });
+    if (error) throw error;
+    return data;
+  };
   document.addEventListener('visibilitychange', () => sync());  /* вернулся — подтянуть; ушёл — отправить */
   addEventListener('online', () => sync());
   addEventListener('offline', () => setStatus('offline'));

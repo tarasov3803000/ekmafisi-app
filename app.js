@@ -2,7 +2,7 @@
    EK.lib — тексты, EK.uid — кто вошёл, EK.content(путь) — файл из закрытого хранилища (с кэшем), EK.queue* — отправка. */
 const LIB = EK.lib;
 const LEVELS = { A1: 1, A2: 2, B1: 3, B2: 4 };
-const MODE_NAME = { skor: 'Повторение', bt: 'Обратный перевод' };  /* ключ skor — прежнее имя «Скороговорки»: так в настройках и адресах */
+const MODE_NAME = { skor: 'Повторение', bt: 'Обратный перевод', soberi: 'Собери' };  /* ключ skor — прежнее имя «Скороговорки»: так в настройках и адресах */
 /* язык материала: текст фразы — поле t (прежние греческие материалы — el), порядок форм глагола и надписи — по языку */
 const LANGS = {
   el: { name: 'греческий', chip: 'ΕΛ', say: 'по-гречески', to: 'на греческий', forms: ['present', 'imperfect', 'aorist', 'future'] },
@@ -186,7 +186,7 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
-  ['shelf', 'settings', 'home', 'skor', 'bt', 'check', 'words'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  ['shelf', 'settings', 'home', 'skor', 'bt', 'check', 'words', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0);
   if (id === 'shelf') { if (window.EK_UPDATE) return location.reload(); renderShelf(); }
   if (id === 'home') renderHome();
@@ -207,7 +207,7 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
   else { history.replaceState({ d: 0, sheet: null }, '', urlOf(fallback)); applyLoc(); }
 }
 function parseHash(h) {
-  if (h === 'settings' || h === 'check' || h === 'words') return { v: h };
+  if (['settings', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
   for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
   return LIB.some(m => m.id === h) ? { v: 'home', id: h } : { v: 'shelf' };
 }
@@ -215,6 +215,8 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
   if (t.v === 'shelf' || t.v === 'settings' || t.v === 'words') { if (force || !shown(t.v)) show(t.v); }
   else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
+  else if (t.v === 'soberi') { if (force || !shown('soberi')) soberiOpen(); }
+  else if (t.v === 'sbgo') { if (force || !shown('sbgo')) sbGo(SB.step); }
   else {
     const fresh = !M || M.id !== t.id;
     if (fresh) setText(t.id);
@@ -251,10 +253,16 @@ function renderShelf() {
     $('chkOpen').disabled = !n;
     $('wordsOpen').innerHTML = `<span>Слова · ${w.ok}</span><small>освоено</small>`;
   }
-  $('resume').classList.toggle('hidden', !last);
-  if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(last.title)}</small>`;
+  /* «Собери» — только у греческого: карточка над текстами с текущей ступенью */
+  const sbOn = G.lang === 'el';
+  $('sbCard').classList.toggle('hidden', !sbOn);
+  if (sbOn) $('sbCard').innerHTML = `<span class="t">Собери · ${esc(SB.step)}</span><span class="meta2">${esc(ladderOf(SB.step).t)}</span>`;
+  const sbLast = sbOn && G.mode === 'soberi';
+  $('resume').classList.toggle('hidden', !last && !sbLast);
+  if (sbLast) $('resume').innerHTML = `<span>Продолжить · Собери</span><small>ступень ${esc(SB.step)} — ${esc(ladderOf(SB.step).t)}</small>`;
+  else if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(last.title)}</small>`;
 }
-$('resume').onclick = () => { openText(lastId()); start(G.mode); };
+$('resume').onclick = () => { if (G.lang === 'el' && G.mode === 'soberi') { push('soberi'); push('sbgo'); sbGo(SB.step); return; } openText(lastId()); start(G.mode); };
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
 /* --- настройки: всё, что не учёба — язык, тема, учётная запись, итог --- */
 $('setOpen').onclick = () => { push('settings'); show('settings'); };
@@ -715,27 +723,28 @@ function diff(user, orig, lang) {
     else j++;
   }
   const U = A.map(x => `<span class="bad">${esc(x.w)}</span>`), O = B.map(x => `<span class="miss">${esc(x.w)}</span>`);
-  const okU = new Array(A.length).fill(false), gw = new Array(B.length).fill(2);
+  const okU = new Array(A.length).fill(false), gw = new Array(B.length).fill(2), uw = new Array(A.length).fill(2);
   const own = (P, k) => P.map((x, q) => x.k === k ? q : -1).filter(q => q >= 0);
   B.forEach((x, k) => {
     const qs = own(pb, k), q0 = mb[qs[0]], ka0 = q0 !== null ? pa[q0].k : -1;
     if (qs.length === 1 && q0 !== null && A[ka0].parts.length === 1) {  /* слово против слова — по буквам (ударение — пометкой) */
       if (lang === 'en' && pa[q0].p === pb[qs[0]].p) { U[ka0] = esc(A[ka0].w); O[k] = esc(x.w); gw[k] = 0; }  /* colour = color, I = i */
       else { [U[ka0], O[k]] = charDiff(A[ka0].w, x.w); gw[k] = wordGrade(A[ka0].w, x.w); }
-      okU[ka0] = true;
+      okU[ka0] = true; uw[ka0] = gw[k];
     } else if (qs.every(q => mb[q] !== null && pa[mb[q]].p === pb[q].p)) {  /* все части совпали — верно, как бы ни было записано (I'm = I am) */
       O[k] = esc(x.w); gw[k] = 0;
-      qs.forEach(q => { const ka = pa[mb[q]].k; okU[ka] = true; if (own(pa, ka).every(r => ma[r] !== null && pa[r].p === pb[ma[r]].p)) U[ka] = esc(A[ka].w); });
+      qs.forEach(q => { const ka = pa[mb[q]].k; okU[ka] = true; uw[ka] = 0; if (own(pa, ka).every(r => ma[r] !== null && pa[r].p === pb[ma[r]].p)) U[ka] = esc(A[ka].w); });
     } else {  /* сокращение без апострофа (doesnt) — по буквам: выделяется только недостающий апостроф */
       const bare = w => w.toLowerCase().replace(/'/g, '');
       const ka = qs.map(q => mb[q]).filter(r => r !== null).map(r => pa[r].k).find(t => bare(A[t].w) === bare(x.w));
-      if (ka !== undefined) { [U[ka], O[k]] = charDiff(A[ka].w, x.w); gw[k] = wordGrade(A[ka].w, x.w); okU[ka] = true; }
+      if (ka !== undefined) { [U[ka], O[k]] = charDiff(A[ka].w, x.w); gw[k] = wordGrade(A[ka].w, x.w); okU[ka] = true; uw[ka] = gw[k]; }
     }
   });
   /* часть слова-сокращения, сведённая с верным словом, — не лишнее */
   pa.forEach((x, q) => { if (ma[q] !== null) okU[x.k] = true; });
   const worst = Math.max(0, ...gw, ...okU.map(v => v ? 0 : 2));
-  return { u: U.join(' '), o: O.join(' '), g: ['g', 'y', 'r'][worst] };
+  /* uw — своё слово: 0 верно, 1–2 с ошибкой, 2 и не сведено — лишнее (extra); miss — сколько верных слов не написано */
+  return { u: U.join(' '), o: O.join(' '), g: ['g', 'y', 'r'][worst], words: A.map((x, k) => ({ w: x.w, e: uw[k], extra: !okU[k] })), miss: gw.filter((v, k) => v === 2 && !O[k].startsWith('<span class="cx') && O[k].includes('class="miss"')).length, err: worst ? (U.join('').match(/class="(cx|bad)"/g) || []).length + (O.join('').match(/class="miss"/g) || []).length : 0 };
 }
 /* --- FSRS (FSRS-5, веса по умолчанию): состояние фразы пересчитывается из журнала — схема базы не меняется ---
    Оценка: сверка письма (bt, check; прежние bt-письмо, bt-голос) — не знаю → Again, с трудом → Hard, знаю → Good; «выучено» → Easy.
@@ -869,6 +878,193 @@ function renderWord(l) {
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-word]'); if (b) { push(curHash(), { k: 'word', l: b.dataset.word }); openSheet(history.state.sheet); } });
 
+/* --- «Собери» (docs/soberi.md): цепочки по 8 шагов, каждый шаг меняет одну вещь; ответ письмом, сверка с вариантами ---
+   Источник цепочек: первый пакет (content el/soberi-start.json) и запас человека (soberi_chains, функция soberi).
+   Оценка: верно с первой попытки — «знаю»; со второй, после подсказки, — «с трудом»; иначе — «не знаю» (шаг повторяется в конце цепочки).
+   Строка progress: text_id «soberi», phrase_id «цепочка:шаг»; отметка в log с режимом soberi. Настройки — ключ soberi. */
+const LADDER = [
+  { k: 'И1', t: 'имена: именительный и винительный, ед. ч.', ex: 'ο μεγάλος σκύλος → τον μεγάλο σκύλο' },
+  { k: 'Г1', t: 'глаголы группы А (-ω), четыре формы', ex: 'γράφω, έγραφα, έγραψα, θα γράψω' },
+  { k: 'И2', t: 'имена: им. и вин., мн. ч.', ex: 'οι / τους / τις / τα' },
+  { k: 'Г2', t: 'глаголы группы Β (-άω / -ώ)', ex: 'μιλάω, μιλούσα, μίλησα, θα μιλήσω' },
+  { k: 'И3', t: 'имена: родительный падеж', ex: 'του / της / των' },
+  { k: 'Г3', t: 'глаголы группы Γ (-ομαι, -άμαι)', ex: 'ντύνομαι, ντυνόμουν, ντύθηκα, θα ντυθώ' },
+  { k: 'И4', t: 'имена: трудные типы', ex: '-ης / -ας, ж. р. на -ος, πολύς, -ύς' },
+  { k: 'Г4', t: 'слабые местоимения и повелительное', ex: 'το έφαγα · δώσ’ το μου' }
+];
+const ladderOf = k => LADDER.find(x => x.k === k) || LADDER[0];
+const SBKEY = 'ekmafisi.soberi', SBCKEY = 'ekmafisi.soberi.chains';
+let SB = Object.assign({ step: 'И1', opora: true, played: [], flags: {} }, read(SBKEY) || {});
+const saveSB = () => { write(SBKEY, SB); setSynced('soberi', SB); };
+setSynced('soberi', SB);
+let SBSTART = null;  /* первый пакет */
+let SBC = read(SBCKEY) || [];  /* запас с сервера: [{ id, step, chain }] */
+async function sbLoad() {
+  if (!SBSTART) try { SBSTART = (await (await EK.content('el/soberi-start.json', navigator.onLine)).json()).chains; } catch (e) { SBSTART = []; }
+  try { const rows = await EK.chains(); if (rows) { SBC = rows.filter(r => r.lang === 'el').map(r => ({ id: r.id, step: r.step, chain: Object.assign({}, r.chain, { id: r.id, step: r.step }) })); write(SBCKEY, SBC); } } catch (e) { console.warn('chains', e); }
+}
+const sbStock = step => [...(SBSTART || []).filter(c => c.step === step), ...SBC.filter(r => r.step === step).map(r => r.chain)].filter(c => !SB.played.includes(c.id));
+/* пополнить запас ступени в фоне: слова — из зелёных и жёлтых фраз греческих текстов, первый шаг — фраза блогера */
+let sbAsked = {};
+function sbRefill(step) {
+  if (EK.DEV || !navigator.onLine || sbAsked[step] || sbStock(step).length >= 2) return;
+  sbAsked[step] = true;
+  const words = {}, phrases = [];
+  LIB.filter(m => m.lang === 'el').forEach(m => {
+    const st = stateOf(m);
+    m.phrases.forEach(p => {
+      const c = st.colors[p.id]; if (c !== 'g' && c !== 'y') return;
+      phrases.push({ id: m.id + ':' + p.id, t: TX(p), ru: p.ru });
+      p.words.forEach(w => { if (w.l && !words[w.l]) { const L = m.lexicon[w.l] || {}; words[w.l] = { l: w.l, ru: L.ru || '', pos: L.pos || '' }; } });
+    });
+  });
+  EK.fn({ action: 'refill', lang: 'el', step, words: Object.values(words), phrases: phrases.slice(-60) })
+    .then(() => sbLoad()).catch(e => { console.warn('refill', e); setTimeout(() => { sbAsked[step] = false; }, 600000); });
+}
+$('sbCard').onclick = () => { push('soberi'); soberiOpen(); };
+async function soberiOpen() {
+  show('soberi'); G.mode = 'soberi'; saveG();
+  renderSteps(); await sbLoad(); if (shown('soberi')) renderSteps();
+}
+function renderSteps() {
+  $('sbSteps').innerHTML = LADDER.map(x => `<button data-step="${x.k}" aria-pressed="${x.k === SB.step}"><b>${x.k}</b><span>${esc(x.t)}</span><span class="n">${SBSTART ? sbStock(x.k).length : ''}</span><span class="ex">${esc(x.ex)}</span></button>`).join('');
+  $('sbStock').textContent = SBSTART ? 'Число справа — сколько готовых цепочек в запасе.' : 'Загружаю цепочки…';
+  document.querySelectorAll('#sbSteps button').forEach(b => b.onclick = () => { SB.step = b.dataset.step; saveSB(); push('sbgo'); sbGo(SB.step); });
+}
+/* --- шаг --- */
+let go = null;
+const shuffle = a => { const r = a.slice(); for (let i = r.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [r[i], r[j]] = [r[j], r[i]]; } return r; };
+async function sbGo(step) {
+  show('sbgo'); G.mode = 'soberi'; saveG();
+  if (!SBSTART) await sbLoad();
+  const chain = sbStock(step)[0];
+  $('gTtl').textContent = `Собери · ${step}`;
+  $('gEnd').classList.add('hidden');
+  document.querySelector('#sbgo .card').classList.toggle('hidden', !chain);
+  if (!chain) {
+    $('gEnd').classList.remove('hidden'); $('gMore').classList.add('hidden');
+    $('gEndTxt').textContent = navigator.onLine ? 'Готовлю занятие… Цепочки этой ступени кончились, новые придут через минуту-другую.' : 'Цепочки этой ступени кончились. Новые готовятся со связью.';
+    sbRefill(step); setTimeout(() => { if (shown('sbgo') && go === null) sbLoad().then(() => shown('sbgo') && sbStock(step).length && sbGo(step)); }, 60000);
+    go = null; return;
+  }
+  sbRefill(step);
+  const flagged = SB.flags[chain.id] || {};
+  go = { chain, step, q: chain.items.map((_, k) => k).filter(k => !flagged[chain.items[k].n]), k: 0, tries: 0, res: null, grades: {}, again: new Set() };
+  goRender();
+}
+function goRender() {
+  const it = go.chain.items[go.q[go.k]];
+  $('gCnt').textContent = `${go.k + 1} / ${go.q.length}`;
+  $('gRu').textContent = it.ru;
+  $('gBlocks').innerHTML = SB.opora ? shuffle(it.blocks || []).map(b => `<span>${esc(b)}</span>`).join('') : '';
+  $('gBlocks').classList.toggle('hidden', !SB.opora);
+  $('gOpora').textContent = SB.opora ? 'без опоры' : 'показать опору';
+  const r = go.res, final = r && (r.g === 'g' || go.tries >= 2);
+  if (!r) {
+    $('gSlot').innerHTML = `<textarea id="gIn" lang="el" rows="2" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(it.ru)}"></textarea>`;
+    if (go.keep) $('gIn').value = go.keep;
+  } else if (!final) {  /* первая ошибка: свои неверные слова подчёркнуты, намёк, верного ответа нет */
+    $('gSlot').innerHTML = `<div class="cmp"><span class="el you">${r.d.words.map(w => w.e || w.extra ? `<span class="und">${esc(w.w)}</span>` : esc(w.w)).join(' ')}</span></div>`;
+  } else {
+    $('gSlot').innerHTML = `<div class="cmp"><span class="el you">${r.d.u}</span><span class="el">${r.d.o}</span><span class="grade ${go.grades[go.q[go.k]] || r.g}">${GRADE_LBL[go.grades[go.q[go.k]] || r.g]}</span></div>`;
+  }
+  $('gHint').classList.toggle('hidden', !(r && !final));
+  if (r && !final) {
+    const kinds = new Set();
+    r.d.words.forEach(w => { if (w.extra) kinds.add('лишнее слово'); else if (w.e) kinds.add(w.w.length <= 3 ? 'артикль или служебное слово' : 'окончание'); });
+    if (r.d.miss) kinds.add('не хватает слова');
+    $('gHint').innerHTML = `<span class="hint">Исправьте сами: ${esc([...kinds].join(', ') || 'проверьте форму')}</span>` + (it.change ? `<span class="muted">Что поменялось от прошлого шага: ${esc(it.change)}</span>` : '');
+  }
+  $('gCheck').classList.toggle('hidden', !!r);
+  $('gPlayRow').classList.toggle('hidden', !final);
+  $('gNoVoice').classList.toggle('hidden', !(final && !elVoice()));
+  $('gS3').classList.toggle('hidden', !r);
+  $('gOn').classList.toggle('hidden', !final || r.g === 'r');  /* «не знаю» — только «Ещё раз» */
+  $('gMine').classList.toggle('hidden', !(final && r.g !== 'g'));
+  $('gJudge').classList.add('hidden');
+  $('gFlagBox').classList.add('hidden');
+  $('gFlag').textContent = 'Неверно?';
+  paintSpeed(); paintOwner();
+}
+/* сверка с ближайшим из вариантов: меньше оценка, потом меньше ошибок */
+function sbBest(a, it) {
+  let best = null;
+  it.el.forEach(v => { const d = diff(a, v, 'el'), sc = 'gyr'.indexOf(d.g) * 1000 + d.err; if (!best || sc < best.sc) best = { d, v, sc }; });
+  return best;
+}
+$('gOpora').onclick = () => { SB.opora = !SB.opora; saveSB(); const keep = $('gIn') && $('gIn').value; goRender(); if (keep && $('gIn')) $('gIn').value = keep; };
+$('gCheck').onclick = () => {
+  const k = go.q[go.k], it = go.chain.items[k], a = $('gIn').value.trim();
+  const b = a ? sbBest(a, it) : { d: diff('', it.el[0], 'el'), v: it.el[0] };
+  go.tries++;
+  go.res = { a, d: b.d, v: b.v, g: a ? b.d.g : 'r' };
+  if (go.tries === 1 && go.res.g === 'g') sbMark(k, 'g', a);
+  else if (go.tries === 2) sbMark(k, go.res.g === 'g' ? 'y' : 'r', a);
+  goRender();
+};
+function sbMark(k, c, a) {
+  if (go.grades[k]) return;  /* повтор «не знаю» в конце цепочки оценку не меняет */
+  go.grades[k] = c;
+  const pid = go.chain.id + ':' + go.chain.items[k].n, at = now(), id = uuid();
+  EK.queueProgress({ lang: 'el', text_id: 'soberi', phrase_id: pid, cut: 1, color: c, written: a || null, updated_at: at });
+  EK.queueLog({ id, at, kind: 'mark', lang: 'el', text_id: 'soberi', phrase_id: pid, mode: 'soberi', color: c });
+}
+$('gAgain').onclick = () => {
+  stop(); speechSynthesis.cancel();
+  if (go.tries >= 2 && go.res.g !== 'g') go.tries = 1;  /* после образца — ещё попытка, оценка уже стоит */
+  go.keep = ''; go.res = null; goRender(); $('gIn').focus({ preventScroll: true });
+};
+$('gOn').onclick = () => {
+  speechSynthesis.cancel();
+  const k = go.q[go.k];
+  if (go.grades[k] === 'r' && !go.again.has(k)) { go.again.add(k); go.q.push(k); }  /* «не знаю» — ещё раз в конце цепочки */
+  go.k++; go.tries = 0; go.res = null; go.keep = '';
+  if (go.k >= go.q.length) return sbEnd();
+  goRender(); window.scrollTo(0, 0);
+};
+function sbEnd() {
+  SB.played = [...SB.played.filter(id => id !== go.chain.id), go.chain.id].slice(-500); saveSB();
+  if (!String(go.chain.id).startsWith('start-')) EK.chainState(go.chain.id, 'played').catch(() => {});
+  document.querySelector('#sbgo .card').classList.add('hidden');
+  const c = Object.values(go.grades), n = x => c.filter(y => y === x).length;
+  $('gEndTxt').textContent = `Цепочка пройдена: знаю — ${n('g')}, с трудом — ${n('y')}, не знаю — ${n('r')}.`;
+  $('gMore').classList.remove('hidden'); $('gEnd').classList.remove('hidden');
+  sbRefill(go.step);
+}
+$('gMore').onclick = () => sbGo(SB.step);
+$('gExit').onclick = () => goBack('');
+/* «Неверно?» — пометка; шаг уходит из запаса, текст — в журнал и настройки */
+$('gFlag').onclick = () => $('gFlagBox').classList.toggle('hidden');
+$('gFlagSave').onclick = () => {
+  const it = go.chain.items[go.q[go.k]], t = $('gFlagText').value.trim(); if (!t) return;
+  (SB.flags[go.chain.id] = SB.flags[go.chain.id] || {})[it.n] = { text: t, t: now().slice(0, 16), ru: it.ru, el: it.el[0] };
+  saveSB();
+  EK.queueLog({ id: uuid(), at: now(), kind: 'mark', lang: 'el', text_id: 'soberi', phrase_id: go.chain.id + ':' + it.n, mode: 'soberi-flag', color: null });
+  $('gFlagText').value = ''; $('gFlagBox').classList.add('hidden');
+  go.q = go.q.filter((k, j) => j <= go.k || go.chain.items[k].n !== it.n);
+  $('gOn').classList.remove('hidden'); $('gFlag').textContent = 'Отмечено';
+  if (!go.res) $('gOn').onclick();
+};
+/* «Моё тоже верно?» — суждение ИИ (Sonnet) по кнопке; верно — оценка «знаю» поверх, вариант запоминается в цепочке на этом устройстве */
+$('gMine').onclick = async () => {
+  const k = go.q[go.k], it = go.chain.items[k];
+  $('gJudge').classList.remove('hidden'); $('gJudge').textContent = 'Спрашиваю…';
+  try {
+    const r = await EK.fn({ action: 'judge', ru: it.ru, answer: go.res.a, variants: it.el });
+    $('gJudge').textContent = (r.ok ? 'Верно. ' : 'Неверно. ') + (r.note || '');
+    if (r.ok) { it.el.push(go.res.a); go.grades[k] = null; sbMark(k, go.tries <= 1 ? 'g' : 'y', go.res.a); $('gOn').classList.remove('hidden'); $('gMine').classList.add('hidden'); }
+  } catch (e) { $('gJudge').textContent = EK.DEV ? 'В режиме проверки без входа ИИ не спрашиваем.' : navigator.onLine ? 'Не вышло спросить — попробуйте позже.' : 'Нет сети.'; }
+};
+/* голос телефона: synthesis el-GR; скорость — та же лесенка */
+const elVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^el(-|_|$)/i.test(v.lang));
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { if (shown('sbgo') && go && go.res) goRender(); };
+$('gPlay').onclick = () => {
+  const v = elVoice(); if (!v || !go.res) return;
+  if (speechSynthesis.speaking) { speechSynthesis.cancel(); return; }
+  const u = new SpeechSynthesisUtterance(go.res.v); u.voice = v; u.lang = v.lang; u.rate = G.rate;
+  speechSynthesis.speak(u);
+};
+
 /* --- тема: авто (как в системе) · светлая · тёмная --- */
 const THEMES = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
 function paintTheme() {
@@ -922,6 +1118,7 @@ EK.onRemote = ({ progress, log, settings }) => {
     T[k] = r;
     if (G_SYNC.includes(k)) G[k] = r.v;
     else if (k === 'flags') write(FKEY, r.v || {});
+    else if (k === 'soberi') { SB = Object.assign(SB, r.v || {}); write(SBKEY, SB); }
     else if (k.startsWith('pos.') && byId[k.slice(4)]) Object.assign(progFor(k.slice(4)), r.v || {});
   });
   write(TKEY, T); write(SKEY, G);
