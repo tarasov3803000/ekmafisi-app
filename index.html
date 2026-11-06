@@ -16,7 +16,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
-<script>try { if (localStorage.getItem('ekmafisi-big') === '1') document.documentElement.classList.add('big'); } catch (e) {}</script>
+<script>/* крупный шрифт +1/+2/+3 px — до первой отрисовки; прежний переключатель «вкл» (ekmafisi-big = 1) — это +3 */
+try { const u = localStorage.getItem('ekmafisi-up') ?? (localStorage.getItem('ekmafisi-big') === '1' ? '3' : '0'); document.documentElement.style.setProperty('--up', (+u || 0) + 'px'); } catch (e) {}</script>
 <style>
 /* Экмафиси (PWA, выросла из пробной страницы): один столбец под телефон; полка текстов → текст → режим. Греческий — книжным шрифтом крупно, остальное тихо. */
 :root {
@@ -34,10 +35,9 @@
   --aegean: #1a6d9c;  /* написанное человеком на сверке — эгейский синий */
   --f-el: "Literata", "Noto Serif", Georgia, serif;
   --f-ui: "Manrope", "Noto Sans", system-ui, sans-serif;
-  --up: 0px;  /* «Крупный шрифт» в настройках: +3 px ко всем текстам */
+  --up: 0px;  /* «Крупный шрифт» в настройках: +1, +2 или +3 px ко всем текстам */
   color-scheme: light;
 }
-:root.big { --up: 3px; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --paper: #0f151c; --card: #18212b; --ink: #e6edf3; --muted: #93a3b3; --line: #2a3644;
@@ -112,6 +112,8 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .ph { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
 .ph:last-child { border-bottom: 0; }
 .ph-play { flex: 1; display: grid; grid-template-columns: 14px 1fr; gap: 4px 12px; padding: 10px 0; border: 0; text-align: left; background: none; }
+.ph-lrn { border: 0; background: none; color: var(--line); padding: 0 0 0 10px; display: inline-grid; place-items: center; }
+.ph-lrn[aria-pressed="true"] { color: var(--g); }
 .ph-go { border: 0; background: none; color: var(--muted); font-size: calc(24px + var(--up)); padding: 0 2px 0 14px; }  /* «›» — учить с этой фразы */
 .ph .dot { margin-top: 8px; }
 .ph .el { font-size: calc(17px + var(--up)); }
@@ -126,27 +128,22 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .loading { font-size: calc(13px + var(--up)); color: var(--muted); }
 
 /* занятие */
-.ladder { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-.ladder div { font-size: calc(12px + var(--up)); text-align: center; color: var(--muted); padding-top: 6px; border-top: 4px solid var(--line); font-variant-numeric: tabular-nums; }
-.ladder div.done { border-top-color: var(--accent); }
-.ladder div.now { border-top-color: var(--accent); color: var(--ink); font-weight: 700; }
-.ladder div.skip { opacity: .35; }
 .big { font: 400 calc(26px + var(--up))/1.35 var(--f-el); min-height: 2.7em; }
 .w { cursor: pointer; border-bottom: 1px dotted var(--muted); }
-.veil { font: 400 calc(26px + var(--up))/1.35 var(--f-el); color: var(--muted); letter-spacing: .2em; min-height: 2.7em; }
 .ru-line { color: var(--muted); font-size: calc(22px + var(--up)); line-height: 1.35; }  /* перевод — почти кеглем оригинала (26) */
 .line .ru-line { font-size: calc(18px + var(--up)); }
 .hint { font-weight: 600; }
-.reps { display: flex; gap: 8px; }
-.reps i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); }
-.reps i.on { background: var(--accent); }
-.colors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.colors button { border-radius: 12px; min-height: 48px; font-weight: 700; border: 2px solid transparent; padding: 8px 4px; }
-.colors .g { background: var(--g-soft); border-color: var(--g); }
-.colors .y { background: var(--y-soft); border-color: var(--y); }
-.colors .r { background: var(--r-soft); border-color: var(--r); }
-.colors button[aria-pressed="true"] { box-shadow: inset 0 0 0 3px currentColor; }
-.colors.sm button { min-height: 40px; font-size: calc(14px + var(--up)); }
+.sub { color: var(--muted); font-size: calc(15px + var(--up)); margin-top: -12px; }  /* подпись режима под заголовком */
+.vh { visibility: hidden; }  /* скрытый греческий держит своё место: русский не прыгает */
+.pcard { position: relative; }
+.lrn { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; border: 0; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; border-radius: 10px; }
+.lrn[aria-pressed="true"] { color: var(--g); }
+.line.has-lrn { position: relative; padding-right: 40px; }
+.line .lrn { top: -6px; right: -6px; }
+.dots { font: 400 calc(20px + var(--up))/1.4 var(--f-el); color: var(--muted); letter-spacing: .15em; }
+.grade { justify-self: start; font-size: calc(13px + var(--up)); font-weight: 700; border-radius: 999px; padding: 2px 10px; }
+.grade.g { background: var(--g-soft); color: var(--g); } .grade.y { background: var(--y-soft); color: var(--y); } .grade.r { background: var(--r-soft); color: var(--r); }
+.line .known { color: var(--muted); }
 .gloss { background: var(--paper); border-radius: 10px; padding: 12px; display: grid; gap: 4px; font-size: calc(15px + var(--up)); }
 .gloss .el { font-size: calc(18px + var(--up)); }
 .forms { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
@@ -157,10 +154,8 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .line .ru { font-size: calc(19px + var(--up)); }  /* «Обратный перевод»: что сказать по-гречески */
 .line.playing .el { color: var(--accent); }
 textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(--f-el); border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--paper); color: var(--ink); resize: vertical; }
-.cmp { display: grid; gap: 4px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-.cmp:last-child { border-bottom: 0; padding-bottom: 0; }
+.cmp { display: grid; gap: 4px; }
 .cmp .el { font-size: calc(19px + var(--up)); }
-.cmp .ru { font-size: calc(17px + var(--up)); color: var(--muted); }
 .cmp .you { color: var(--aegean); margin-bottom: 6px; }  /* своё — эгейским, под ним с небольшим пропуском верное */
 .cx { background: var(--r-soft); box-shadow: inset 0 -2px var(--r); }  /* неверная или лишняя буква в своём; пропущенная или заменённая — в верном */
 .ca { background: var(--y-soft); box-shadow: inset 0 -2px var(--y); }  /* только ударение */
@@ -206,19 +201,25 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .topbar .icon { border: 0; background: none; padding: 8px; color: var(--muted); display: inline-flex; border-radius: 10px; }
 .acct { font-size: calc(13px + var(--up)); color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
 .acct button { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-size: calc(13px + var(--up)); font-weight: 600; }
-/* звук: один крупный ▶ без слова, рядом — той же величины «закрыть оригинал» (или «подсмотреть»); под ними скорость  <  1,0  > */
-.ctl { display: flex; justify-content: center; gap: 28px; }
-.ic { width: 64px; height: 64px; border: 0; background: none; color: var(--accent); display: inline-grid; place-items: center; border-radius: 16px; padding: 0; }
+/* ряд кнопок занятия — все одного размера: ✓ · < · ▶ со скоростью внутри · > · глаз («Обратный перевод» — без ✓) */
+.ctl { display: flex; justify-content: space-between; max-width: 380px; width: 100%; margin: 0 auto; }
+.ctl.c4 { max-width: 300px; }
+.ic { width: 64px; height: 64px; border: 0; background: none; color: var(--accent); display: inline-grid; place-items: center; border-radius: 16px; padding: 0; position: relative; }
 .ic:active { background: var(--accent-soft); }
+.ic:disabled { opacity: .3; cursor: default; }
+.ic[aria-pressed="true"] { background: var(--accent-soft); }
+.ic.play { align-content: center; gap: 0; }
+.ic .rt { font: 700 13px/1 var(--f-ui); font-variant-numeric: tabular-nums; color: var(--muted); }  /* скорость — внутри кнопки звука */
 .spd { display: flex; justify-content: center; gap: 10px; }
-.spd button { width: 52px; height: 44px; border: 2px solid transparent; border-radius: 12px; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
-.spd button[aria-pressed="true"] { border-color: var(--sky); color: var(--ink); }  /* вжатая — светло-синий контур */
+.spd > * { width: 52px; height: 44px; border: 2px solid transparent; border-radius: 12px; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.spd b { border-color: var(--sky); color: var(--ink); font-size: calc(15px + var(--up)); }  /* текущая скорость — светло-синий контур */
+.spd button:disabled { opacity: .3; cursor: default; }
 .sw { width: 52px; height: 32px; border-radius: 16px; border: 0; background: var(--line); position: relative; padding: 0; flex: none; }
 .sw i { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s; }
 .sw[aria-checked="true"] { background: var(--accent); }
 .sw[aria-checked="true"] i { left: 23px; }
 .upd { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20; border: 0; border-radius: 999px; padding: 10px 18px; background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
-@media (prefers-reduced-motion: no-preference) { .btn, .colors button, .text { transition: transform .08s; } .btn:active, .text:active { transform: scale(.985); } }
+@media (prefers-reduced-motion: no-preference) { .btn, .text { transition: transform .08s; } .btn:active, .text:active { transform: scale(.985); } }
 </style>
 </head>
 <body>
@@ -266,8 +267,9 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <div class="seg" id="setTheme" role="group" aria-label="Тема"><button data-t="auto">авто</button><button data-t="light">светлая</button><button data-t="dark">тёмная</button></div>
   </section>
   <section class="card">
-    <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>Крупный шрифт</h2><button class="sw" id="setBig" role="switch" aria-checked="false" aria-label="Крупный шрифт"><i></i></button></div>
-    <p class="small muted">Все тексты на три ступени крупнее. Только на этом устройстве.</p>
+    <h2>Шрифт</h2>
+    <div class="seg" id="setBig" role="group" aria-label="Размер шрифта"><button data-up="0">обычный</button><button data-up="1">+1</button><button data-up="2">+2</button><button data-up="3">+3</button></div>
+    <p class="small muted">Все тексты крупнее на одну, две или три ступени. Только на этом устройстве.</p>
   </section>
   <section class="card">
     <h2>Учётная запись</h2>
@@ -297,14 +299,14 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <div class="modes">
     <div class="card">
       <button class="mode" data-mode="skor">
-        <b>Скороговорка</b>
-        <span class="small muted">Фраза за фразой: вместе с автором (0,8×, оригинал или 1,5×) → по памяти → быстрее оригинала, три раза без запинки.</span>
+        <b>Повторение</b>
+        <span class="small muted">Повторите фразу многократно до автоматического запоминания.</span>
       </button>
     </div>
     <div class="card">
       <button class="mode" data-mode="bt">
         <b>Обратный перевод</b>
-        <span class="small muted">Кусок из 2–3 фраз: оригинал → русский → восстановить голосом или письмом → сверка рядом.</span>
+        <span class="small muted" id="btSub">Переведите фразу на греческий, не глядя на оригинал.</span>
       </button>
     </div>
   </div>
@@ -322,52 +324,39 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 </main>
 
 <main id="skor" class="hidden">
-  <div class="bar"><span class="ttl">Скороговорка</span><span class="cnt" id="sCnt"></span></div>
-  <div class="ladder" id="ladder"></div>
-  <div class="card">
+  <div class="bar"><span class="ttl">Повторение</span><span class="cnt" id="sCnt"></span></div>
+  <p class="sub">Повторите фразу многократно до автоматического запоминания</p>
+  <div class="card pcard">
+    <button class="lrn" id="sLrn" aria-pressed="false" aria-label="Выучено"></button>
     <div id="sText" class="big el"></div>
-    <div id="sVeil" class="veil hidden">· · · · ·</div>
     <p id="sRu" class="ru-line"></p>
     <div id="sGloss" class="gloss hidden"></div>
   </div>
-  <p id="sHint" class="hint"></p>
-  <div id="sReps" class="reps hidden"><i></i><i></i><i></i></div>
-  <div id="sCtl" style="display:grid;gap:12px">
-    <div class="ctl"><button class="ic play" id="sPlay" aria-label="Слушать"></button><button class="ic" id="sPeek" aria-label="Подсмотреть"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-    <div class="spd speed" id="sSpeed" role="group" aria-label="Скорость"></div>
-    <button class="btn primary wide" id="sNext">Дальше</button>
-  </div>
-  <div id="sFast" class="hidden" style="display:grid;gap:12px">
-    <div class="ctl"><button class="ic play" id="sPlay2" aria-label="Слушать"></button></div>
-    <div class="row"><button class="btn" id="sSlip" style="flex:1">Запнулся</button><button class="btn primary" id="sClean" style="flex:1">Без запинки</button></div>
-  </div>
-  <div id="sRate" class="card hidden">
-    <p class="hint">Как далась фраза?</p>
-    <div class="colors" id="sColors">
-      <button class="g" data-c="g">Знаю</button><button class="y" data-c="y">Повторить</button><button class="r" data-c="r">Трудно</button>
-    </div>
+  <div class="ctl" id="sCtl">
+    <button class="ic" id="sDone" aria-label="Пройдено — дальше"></button>
+    <button class="ic slower" aria-label="Медленнее"></button>
+    <button class="ic play" id="sPlay" aria-label="Слушать"></button>
+    <button class="ic faster" aria-label="Быстрее"></button>
+    <button class="ic eye" id="sEye" aria-pressed="false" aria-label="Скрыть текст"></button>
   </div>
 </main>
 
 <main id="bt" class="hidden">
   <div class="bar"><span class="ttl">Обратный перевод</span><span class="cnt" id="bCnt"></span></div>
-  <section id="b1" class="card">
-    <p class="hint">Прочитайте и послушайте</p>
-    <div class="lines" id="b1Lines"></div>
-    <div class="ctl"><button class="ic play" id="b1Play" aria-label="Слушать всё"></button><button class="ic" id="b1Next" aria-label="Закрыть оригинал"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></svg></button></div>
-    <div class="spd speed" id="bSpeed" role="group" aria-label="Скорость"></div>
-  </section>
-  <section id="b2" class="card hidden">
-    <div class="row" style="justify-content:space-between"><p class="hint" id="b2Hint">Скажите по-гречески</p>
-      <div class="seg" id="inMode" role="group" aria-label="Способ ответа"><button data-i="voice">Голосом</button><button data-i="text">Письмом</button></div>
+  <p class="sub" id="bSub"></p>
+  <section class="card">
+    <div class="lines" id="bLines"></div>
+    <div id="bS1" style="display:grid;gap:16px">
+      <div class="ctl c4">
+        <button class="ic slower" aria-label="Медленнее"></button>
+        <button class="ic play" id="bPlay" aria-label="Слушать всё"></button>
+        <button class="ic faster" aria-label="Быстрее"></button>
+        <button class="ic eye" id="bEye" aria-pressed="false" aria-label="Скрыть оригинал"></button>
+      </div>
+      <button class="btn primary wide" id="bNext">Далее</button>
     </div>
-    <div class="lines" id="b2Lines"></div>
-    <button class="btn primary wide" id="b2Next">Сверить</button>
-  </section>
-  <section id="b3" class="card hidden">
-    <p class="hint">Сверка</p>
-    <div class="lines" id="b3Lines"></div>
-    <button class="btn primary wide" id="b3Next">Следующий кусок</button>
+    <button class="btn primary wide hidden" id="bCheck">Сверить</button>
+    <div class="row hidden" id="bS3"><button class="btn" id="bAgain" style="flex:1">Ещё раз</button><button class="btn primary" id="bOn" style="flex:1">Дальше</button></div>
   </section>
 </main>
 

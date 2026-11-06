@@ -2,11 +2,11 @@
    EK.lib — тексты, EK.uid — кто вошёл, EK.content(путь) — файл из закрытого хранилища (с кэшем), EK.queue* — отправка. */
 const LIB = EK.lib;
 const LEVELS = { A1: 1, A2: 2, B1: 3, B2: 4 };
-const MODE_NAME = { skor: 'Скороговорка', bt: 'Обратный перевод' };
+const MODE_NAME = { skor: 'Повторение', bt: 'Обратный перевод' };  /* ключ skor — прежнее имя «Скороговорки»: так в настройках и адресах */
 /* язык материала: текст фразы — поле t (прежние греческие материалы — el), порядок форм глагола и надписи — по языку */
 const LANGS = {
-  el: { name: 'греческий', chip: 'ΕΛ', say: 'по-гречески', forms: ['present', 'imperfect', 'aorist', 'future'] },
-  en: { name: 'английский', chip: 'EN', say: 'по-английски', forms: ['base', 'past', 'participle'] }
+  el: { name: 'греческий', chip: 'ΕΛ', say: 'по-гречески', to: 'на греческий', forms: ['present', 'imperfect', 'aorist', 'future'] },
+  en: { name: 'английский', chip: 'EN', say: 'по-английски', to: 'на английский', forms: ['base', 'past', 'participle'] }
 };
 const LG = m => LANGS[m.lang] || LANGS.el;
 const TX = p => p.t ?? p.el;
@@ -23,11 +23,13 @@ const SKEY = 'ekmafisi.settings';
 const userKey = k => k.replace(/^ekmafisi\./, 'ekmafisi.' + EK.uid + '.');
 const read = k => { try { return JSON.parse(localStorage.getItem(userKey(k)) || 'null'); } catch (e) { return null; } };
 const write = (k, v) => { try { localStorage.setItem(userKey(k), JSON.stringify(v)); } catch (e) {} };
-let G = Object.assign({ rate: 1, input: 'voice', last: null, mode: 'skor', theme: 'auto' }, read(SKEY) || {});
-if (![0.8, 1, 1.5].includes(G.rate)) G.rate = G.rate < 1 ? 0.8 : 1;
-/* настройки на сервере — по ключу { v, t }: rate, input, mode, theme, last; pos.<текст> — где остановился; flags — «Неверно?» */
+/* скорость — лесенка 0,8 · 1 · 1,5 · 2, везде одна */
+const RATES = [0.8, 1, 1.5, 2];
+let G = Object.assign({ rate: 1, last: null, mode: 'skor', theme: 'auto' }, read(SKEY) || {});
+if (!RATES.includes(G.rate)) G.rate = G.rate < 1 ? 0.8 : 1;
+/* настройки на сервере — по ключу { v, t }: rate, mode, theme, last; pos.<текст> — где остановился; flags — «Неверно?» */
 /* язык обучения — lang; «Продолжить» — свой у каждого языка: last.el, last.en */
-const G_SYNC = ['rate', 'input', 'mode', 'theme', 'lang', ...Object.keys(LANGS).map(l => 'last.' + l)];
+const G_SYNC = ['rate', 'mode', 'theme', 'lang', ...Object.keys(LANGS).map(l => 'last.' + l)];
 if (G.last) { const m0 = LIB.find(m => m.id === G.last); if (m0 && !G['last.' + m0.lang]) G['last.' + m0.lang] = G.last; delete G.last; }  /* прежний общий last */
 const lastId = () => G.lang && G['last.' + G.lang];
 const TKEY = 'ekmafisi.settings.t';
@@ -57,10 +59,33 @@ function touch(m, s, pid) {
 function logAdd(m, s, e) {  /* журнал: только добавление; id — чтобы два устройства не задвоили запись */
   const id = uuid(), at = now();
   s.log.push(Object.assign({ id, t: at.slice(0, 16) }, e));
-  EK.queueLog({ id, at, kind: 'mark', lang: m.lang || 'el', text_id: m.id, phrase_id: e.p, mode: e.m, color: e.c });
+  EK.queueLog({ id, at, kind: 'mark', lang: m.lang || 'el', text_id: m.id, phrase_id: e.p, mode: e.m, color: e.c || null });
 }
-function mark(i, c, mode) {
-  S.colors[P[i].id] = c;
+/* «Повторение» → ✓ «пройдено»: отметка без оценки (первая проверка письмом — на следующий день) */
+function passed(i) { logAdd(M, S, { p: P[i].id, c: null, m: 'povt' }); save(); }
+/* «выучено» — значок на фразе: оценка «легко» (Easy), фраза один раз вернётся проверкой примерно через две недели.
+   Снять — та же кнопка: в журнал «unlearn», цвет — каким был до значка */
+const isLearned = (s, pid) => { let v = false; s.log.forEach(x => { if (x.p === pid && (x.m === 'learned' || x.m === 'unlearn')) v = x.m === 'learned'; }); return v; };
+/* «выучено» и не проваленное с тех пор — режимы её пропускают */
+const skipped = (s, pid) => isLearned(s, pid) && s.colors[pid] === 'g';
+function toggleLearned(i) {
+  const pid = P[i].id;
+  if (!isLearned(S, pid)) { mark(i, 'g', 'learned'); return true; }
+  let prev = null, cut = -1;
+  S.log.forEach((x, k) => { if (x.p === pid && x.m === 'learned') cut = k; });
+  S.log.slice(0, cut).forEach(x => { if (x.p === pid && x.c) prev = x.c; });
+  mark(i, prev, 'unlearn'); return false;
+}
+const ICO_LRN = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9.5 12 5l10 4.5L12 14z"/><path d="M6 11.5V16c0 1.4 2.7 3 6 3s6-1.6 6-3v-4.5"/><path d="M22 9.5V15"/></svg>';
+const lrnBtn = (cls, i) => `<button class="${cls}" data-lrn="${i}" aria-pressed="${isLearned(S, P[i].id)}" aria-label="Выучено — уже знаю">${ICO_LRN}</button>`;
+function paintLrn() { document.querySelectorAll('[data-lrn]').forEach(b => b.setAttribute('aria-pressed', String(isLearned(S, P[+b.dataset.lrn].id)))); }
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-lrn]'); if (!b || !M) return;
+  e.stopPropagation(); toggleLearned(+b.dataset.lrn); paintLrn();
+  if (shown('home')) renderHome();
+});
+function mark(i, c, mode) {  /* c — g/y/r; null — без цвета («выучено» снято, а цвета до него не было) */
+  if (c) S.colors[P[i].id] = c; else delete S.colors[P[i].id];
   touch(M, S, P[i].id);
   logAdd(M, S, { p: P[i].id, c, m: mode });
   save();
@@ -88,7 +113,7 @@ const ICO_PAUSE = ICO('<rect x="6" y="4.5" width="4" height="15" rx="1" fill="cu
 function paintOwner() {
   document.querySelectorAll('.ic.play').forEach(b => {
     const on = b === owner && (stopAt !== null || seqActive) && !paused;
-    if (b.dataset.on !== String(on)) { b.dataset.on = String(on); b.innerHTML = on ? ICO_PAUSE : ICO_PLAY; }
+    if (b.dataset.on !== String(on)) { b.dataset.on = String(on); b.innerHTML = playInner(on); }
   });
 }
 function tick() {
@@ -228,10 +253,16 @@ function renderSettings() {
   document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
 }
 document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
-/* крупный шрифт: +3 px ко всем текстам; только на этом устройстве (экраны телефона и Мака разные), ключ вне учётной записи — читается до входа */
-const BIG = 'ekmafisi-big';
-const paintBig = () => { const on = document.documentElement.classList.contains('big'); $('setBig').setAttribute('aria-checked', String(on)); };
-$('setBig').onclick = () => { const on = document.documentElement.classList.toggle('big'); try { localStorage.setItem(BIG, on ? '1' : '0'); } catch (e) {} paintBig(); };
+/* крупный шрифт: +1, +2 или +3 px ко всем текстам, как в читалке; только на этом устройстве (экраны телефона и Мака разные),
+   ключ вне учётной записи — читается до входа (index.html) */
+const UP = 'ekmafisi-up';
+const upNow = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue('--up')) || 0;
+const paintBig = () => document.querySelectorAll('#setBig button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.up === upNow())));
+document.querySelectorAll('#setBig button').forEach(b => b.onclick = () => {
+  document.documentElement.style.setProperty('--up', b.dataset.up + 'px');
+  try { localStorage.setItem(UP, b.dataset.up); localStorage.removeItem('ekmafisi-big'); } catch (e) {}
+  paintBig();
+});
 paintBig();
 document.querySelectorAll('#setTheme button').forEach(b => b.onclick = () => { G.theme = b.dataset.t; saveG(); paintTheme(); renderSettings(); });
 
@@ -252,7 +283,8 @@ function renderHome() {
   $('stat').innerHTML = `${n} ${plural(n, 'фраза', 'фразы', 'фраз')}` + squaresHtml(c, n);
   $('tally').innerHTML = tallyHtml(c, n);
   $('run').textContent = 'Запустить · ' + MODE_NAME[G.mode];
-  $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="dot ${S.colors[p.id] || ''}"></span><span class="el">${esc(TX(p))}</span><span class="ru">${esc(p.ru)}</span></button><button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
+  $('btSub').textContent = `Переведите фразу ${LG(M).to}, не глядя на оригинал.`;
+  $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="dot ${S.colors[p.id] || ''}"></span><span class="el">${esc(TX(p))}</span><span class="ru">${esc(p.ru)}</span></button>${lrnBtn('ph-lrn', i)}<button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
   document.querySelectorAll('#list .ph').forEach(r => {
     const i = +r.dataset.i;
     r.querySelector('.ph-play').onclick = () => toggle(r, () => { playBy(r, i, G.rate, () => r.classList.remove('playing')); r.classList.add('playing'); });
@@ -263,12 +295,12 @@ document.querySelectorAll('.mode').forEach(b => b.onclick = () => start(b.datase
 $('run').onclick = () => start(G.mode);
 function start(mode, i) {  /* i — с какой фразы; без него — с того места, где остановились */
   G.mode = mode; saveG(); push(M.id + '-' + mode);
-  if (mode === 'bt') btOpen(i === undefined ? S.btAt : Math.max(0, CHUNKS.findIndex(c => c.includes(i))));
+  if (mode === 'bt') btOpen(i === undefined ? S.btAt : Math.max(0, CHUNKS.findIndex(c => c.includes(i))), i !== undefined);
   else skorOpen(i === undefined ? S.skorAt : i);
 }
 
 $('copy').onclick = () => {
-  const lines = [`Экмафиси · ${new Date().toISOString().slice(0, 10)} · скорость скороговорки: ${RATE_LBL(G.rate)}`];
+  const lines = [`Экмафиси · ${new Date().toISOString().slice(0, 10)} · скорость: ${RATE_LBL(G.rate)}`];
   LIB.forEach(m => {
     const pr = progOf(m); if (!pr.log.length) return;
     lines.push('', `## ${m.id} — ${m.title}`);
@@ -276,7 +308,7 @@ $('copy').onclick = () => {
       const c = pr.colors[p.id], w = pr.written[p.id];
       if (c || w) lines.push(`${p.id} ${c ? { g: 'зел', y: 'жёл', r: 'кр' }[c] : '—'}${w ? ' | написал: ' + w : ''}`);
     });
-    lines.push('Журнал:'); pr.log.forEach(l => lines.push(`${l.t} ${l.p} ${l.m} ${l.c}`));
+    lines.push('Журнал:'); pr.log.forEach(l => lines.push(`${l.t} ${l.p} ${l.m}${l.c ? ' ' + l.c : ''}`));
   });
   const flags = read('ekmafisi.etymflags') || {};
   if (Object.keys(flags).length) { lines.push('', '## Происхождение — «Неверно?»'); Object.keys(flags).forEach(l => lines.push(`${flags[l].t} ${l}: ${flags[l].text}`)); }
@@ -442,110 +474,155 @@ document.addEventListener('pointercancel', lpCancel);
 document.addEventListener('click', e => { if (lp && lp.fired) { e.stopPropagation(); e.preventDefault(); lp = null; } }, true);
 document.addEventListener('contextmenu', e => { if (e.target.closest('.w')) e.preventDefault(); });
 
-/* --- Скороговорка --- */
-const STEPS = [
-  { lbl: '0,8×', rate: 0.8, hint: 'Говорите вместе с автором' },
-  { lbl: 'оригинал', rate: 1, hint: 'Вместе, в темпе оригинала' },
-  { lbl: 'по памяти', rate: 1, hint: 'Текст скрыт. Скажите по памяти, потом сверьтесь со звуком' },
-  { lbl: 'быстро', rate: 1.15, hint: 'Скороговоркой, быстрее оригинала — три раза подряд без запинки' }
-];
-/* выбрано 1,5× — ступень «вместе» идёт в 1,5×, сверка по памяти и «быстро» — не медленнее её */
-const stepRate = k => k === 0 ? 0.8 : k === 3 ? Math.max(STEPS[3].rate, G.rate) : Math.max(1, G.rate);
-const stepLbl = k => k === 1 && G.rate > 1 ? RATE_LBL(G.rate) : STEPS[k].lbl;
-let sk = { i: 0, step: 0, reps: 0, first: 0 };
+/* --- скорость: лесенка 0,8 · 1 · 1,5 · 2; «<» и «>» — ступенью ниже и выше; текущая — внутри кнопки звука (и в списке фраз между стрелками) --- */
+const CHEV = d => `<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const CH_L = 'M15 5l-7 7 7 7', CH_R = 'M9 5l7 7-7 7';
+const RATE_IN = r => (r === 1 || r === 2 ? r.toFixed(1) : String(r)).replace('.', ',');
+document.querySelectorAll('.ic.slower').forEach(b => b.innerHTML = CHEV(CH_L));
+document.querySelectorAll('.ic.faster').forEach(b => b.innerHTML = CHEV(CH_R));
+document.querySelectorAll('.speed').forEach(el => el.innerHTML =
+  `<button class="slower" aria-label="Медленнее">${CHEV(CH_L).replace(/40/g, '22')}</button><b aria-live="polite"></b><button class="faster" aria-label="Быстрее">${CHEV(CH_R).replace(/40/g, '22')}</button>`);
+function paintSpeed() {
+  const k = RATES.indexOf(G.rate);
+  document.querySelectorAll('.slower').forEach(b => b.disabled = k <= 0);
+  document.querySelectorAll('.faster').forEach(b => b.disabled = k >= RATES.length - 1);
+  document.querySelectorAll('.speed b, .ic.play .rt').forEach(e => e.textContent = RATE_IN(G.rate));
+  document.querySelectorAll('.speed b').forEach(e => e.setAttribute('aria-label', 'Скорость ' + RATE_LBL(G.rate)));
+}
+function setRate(d) {
+  const k = RATES.indexOf(G.rate) + d; if (k < 0 || k >= RATES.length) return;
+  G.rate = RATES[k]; saveG(); paintSpeed();
+  if (owner) audio.playbackRate = audio.defaultPlaybackRate = G.rate;  /* звучащее ускоряется на ходу */
+}
+document.querySelectorAll('.slower').forEach(b => b.onclick = () => setRate(-1));
+document.querySelectorAll('.faster').forEach(b => b.onclick = () => setRate(1));
+/* кнопка звука: значок + скорость под ним; paintOwner меняет только значок */
+const playInner = on => (on ? ICO_PAUSE : ICO_PLAY).replace(/40/g, '34') + `<span class="rt">${RATE_IN(G.rate)}</span>`;
+const EYE = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+const EYE_OFF = '<path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/>';
+const eyeSvg = d => `<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+/* глаз — переключатель: открыт — текст виден (нажать — скрыть), перечёркнут — скрыт (нажать — показать) */
+function paintEye(b, hidden, what) { b.innerHTML = eyeSvg(hidden ? EYE_OFF : EYE); b.setAttribute('aria-pressed', String(hidden)); b.setAttribute('aria-label', (hidden ? 'Показать ' : 'Скрыть ') + what); }
+$('sDone').innerHTML = '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>';
+$('sLrn').innerHTML = ICO_LRN;
+
+/* --- Повторение: один экран; ряд кнопок ✓ · < · ▶ · > · глаз; оценки нет — первая проверка письмом на следующий день --- */
+let sk = { i: 0, hide: false };
+/* следующая фраза, которую не пропускаем («выучено»); все выучены — просто следующая */
+const nextIdx = (i, step) => { for (let k = 1; k <= P.length; k++) { const j = (i + k * step + P.length * 2) % P.length; if (!skipped(S, P[j].id)) return j; } return (i + step + P.length) % P.length; };
 function skorOpen(i) {
   show('skor');
-  sk = { i: i % P.length, first: G.rate < 1 ? 0 : 1 };  /* скорость — последняя выбранная на фразе (0,6× прежней версии → 0,8×) */
-  sk.step = sk.first; sk.reps = 0;
+  sk = { i: i % P.length, hide: sk.hide };  /* скрыт текст или нет — как было на прошлой фразе */
   skorRender();
 }
 function skorRender() {
-  const p = P[sk.i], st = STEPS[sk.step];
+  const p = P[sk.i];
   $('sCnt').textContent = `${sk.i + 1} / ${P.length}`;
-  $('ladder').innerHTML = STEPS.map((s, k) => `<div class="${k < sk.first ? 'skip' : k < sk.step ? 'done' : k === sk.step ? 'now' : ''}">${stepLbl(k)}</div>`).join('');
   $('sText').innerHTML = wordsHtml(p);
-  const hide = sk.step >= 2;
-  $('sText').classList.toggle('hidden', hide);
-  $('sVeil').classList.toggle('hidden', !hide);
-  $('sPeek').classList.toggle('hidden', !hide);
+  $('sText').classList.toggle('vh', sk.hide);
+  paintEye($('sEye'), sk.hide, 'текст');
   $('sRu').textContent = p.ru;
   $('sGloss').classList.add('hidden');
-  $('sHint').textContent = (sk.step === 1 && G.rate > 1 ? 'Вместе, в полтора раза быстрее оригинала' : st.hint).replace('с автором', M.source.with_ru || 'с автором');
-  const fast = sk.step === 3;
-  $('sSpeed').classList.toggle('hidden', sk.step > 1);
-  paintSpeed();
-  $('sCtl').classList.toggle('hidden', fast);
-  $('sFast').classList.toggle('hidden', !fast);
-  $('sReps').classList.toggle('hidden', !fast);
-  $('sRate').classList.add('hidden');
-  [...$('sReps').children].forEach((e, k) => e.classList.toggle('on', k < sk.reps));
+  $('sLrn').dataset.lrn = sk.i; paintLrn();
   document.querySelectorAll('#sText .w').forEach(e => e.onclick = () => {
+    if (sk.hide) return;
     const g = $('sGloss'); g.innerHTML = glossHtml(p.words[+e.dataset.k]); g.classList.remove('hidden'); pickWord($('sText'), e);
   });
+  paintSpeed(); paintOwner();
   /* звук — только по «▶»: автозапуска нет (Ваше слово, 5 ноября 2026) */
 }
-['sPlay', 'sPlay2'].forEach(id => $(id).onclick = () => toggle($(id), () => playBy($(id), sk.i, stepRate(sk.step))));
-/* скорость одна на всё прослушивание и запоминается: 0,8× — ступень «вместе медленно», оригинал и 1,5× — сразу в темпе */
-/* скорость — три значка под кнопкой звука:  <  1,0  >  (0,8× · оригинал · 1,5×); вжатая — светло-синим контуром */
-const CHEV = d => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
-document.querySelectorAll('.speed').forEach(el => el.innerHTML =
-  `<button data-r="0.8" aria-label="Медленнее, 0,8×">${CHEV('M15 5l-7 7 7 7')}</button><button data-r="1" aria-label="Оригинал">1,0</button><button data-r="1.5" aria-label="Быстрее, 1,5×">${CHEV('M9 5l7 7-7 7')}</button>`);
-function paintSpeed() { document.querySelectorAll('.speed button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.r === G.rate))); }
-document.querySelectorAll('.speed button').forEach(b => b.onclick = () => {
-  G.rate = +b.dataset.r; saveG(); paintSpeed();
-  if (b.parentNode.id === 'sSpeed') { sk.first = sk.step = G.rate < 1 ? 0 : 1; sk.reps = 0; skorRender(); if (owner) audio.playbackRate = audio.defaultPlaybackRate = stepRate(sk.step); }
-  else if (owner) audio.playbackRate = audio.defaultPlaybackRate = G.rate;  /* звучащее ускоряется на ходу */  /* в списке и «Обратном переводе» звучащее ускоряется на ходу */
-});
-paintSpeed(); paintOwner();
-$('sPeek').onclick = () => { $('sText').classList.remove('hidden'); $('sVeil').classList.add('hidden'); };
-$('sNext').onclick = () => { sk.step++; sk.reps = 0; skorRender(); };
-$('sSlip').onclick = () => { sk.reps = 0; skorRender(false); };
-$('sClean').onclick = () => {
-  sk.reps++; skorRender(false);
-  if (sk.reps >= 3) { $('sFast').classList.add('hidden'); $('sRate').classList.remove('hidden'); $('sText').classList.remove('hidden'); $('sVeil').classList.add('hidden'); $('sHint').textContent = 'Натренирована.'; }
+$('sPlay').onclick = () => toggle($('sPlay'), () => playBy($('sPlay'), sk.i, G.rate));
+$('sEye').onclick = () => { sk.hide = !sk.hide; $('sText').classList.toggle('vh', sk.hide); paintEye($('sEye'), sk.hide, 'текст'); if (sk.hide) $('sGloss').classList.add('hidden'); };
+$('sDone').onclick = () => {
+  stop(); passed(sk.i);
+  S.skorAt = nextIdx(sk.i, 1); save();
+  sk.i = S.skorAt; skorRender(); window.scrollTo(0, 0);
 };
-document.querySelectorAll('#sColors button').forEach(b => b.onclick = () => {
-  mark(sk.i, b.dataset.c, 'skor');
-  S.skorAt = (sk.i + 1) % P.length; save();
-  sk.i = S.skorAt; sk.step = sk.first; sk.reps = 0; skorRender();
-});
 
-/* --- Обратный перевод --- */
-let bc = 0, bColors = {};
-function btOpen(c) {
-  show('bt'); bc = c % CHUNKS.length; bColors = {};
-  $('bCnt').textContent = `кусок ${bc + 1} / ${CHUNKS.length}`;
-  ['b1', 'b2', 'b3'].forEach((x, k) => $(x).classList.toggle('hidden', k !== 0));
-  $('b1Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line" data-i="${i}"><span class="el">${wordsHtml(P[i])}</span><span class="ru-line">${esc(P[i].ru)}</span><div class="gloss hidden"></div></div>`).join('');
-  document.querySelectorAll('#b1Lines .line').forEach(l => {
-    const i = +l.dataset.i;
-    l.querySelector('.el').onclick = ev => {
-      const w = ev.target.closest('.w');
-      if (w) { const g = l.querySelector('.gloss'); g.innerHTML = glossHtml(P[i].words[+w.dataset.k]); g.classList.remove('hidden'); pickWord($('b1Lines'), w); return; }
-      toggle(l, () => { playBy(l, i, G.rate, () => l.classList.remove('playing')); l.classList.add('playing'); });
-    };
+/* --- Обратный перевод: один экран — шаг 1 (читать и слушать, глаз скрывает оригинал), шаг 2 (поле на каждую фразу), сверка ---
+   Русский и греческий не двигаются: на месте греческого — точки (по одной на слово), потом поля, потом сверка.
+   Оценку ставит сверка, по первой попытке; «Ещё раз» её не меняет. Фразы с «выучено» полей не получают. */
+let bt = { c: 0, step: 1, hide: false, tries: 0, res: {} };
+const btIdx = () => CHUNKS[bt.c].filter(i => !skipped(S, P[i].id));
+const dotsOf = p => (TX(p).match(/\S+/g) || []).map(() => '•').join(' ');
+const GRADE_LBL = { g: 'знаю', y: 'с трудом', r: 'не знаю' };
+function btOpen(c, exact) {  /* exact — открыт «›» у фразы: кусок с ней, даже если вся она «выучено» */
+  show('bt');
+  c = c % CHUNKS.length;
+  if (!exact) for (let k = 0; k < CHUNKS.length && CHUNKS[c].every(i => skipped(S, P[i].id)); k++) c = (c + 1) % CHUNKS.length;
+  bt = { c, step: 1, hide: false, tries: 0, res: {} };
+  $('bCnt').textContent = `кусок ${c + 1} / ${CHUNKS.length}`;
+  $('bSub').textContent = `Переведите фразу ${LG(M).to}, не глядя на оригинал`;
+  $('bLines').innerHTML = CHUNKS[c].map(i => `<div class="line has-lrn" data-i="${i}">${lrnBtn('lrn', i)}<div class="slot"></div><span class="ru-line">${esc(P[i].ru)}</span><div class="gloss hidden"></div></div>`).join('');
+  btRender(); window.scrollTo(0, 0);
+}
+function btRender(keep) {  /* keep — что оставить в полях при «Ещё раз» */
+  const live = new Set(btIdx());
+  document.querySelectorAll('#bLines .line').forEach(l => {
+    const i = +l.dataset.i, p = P[i], slot = l.querySelector('.slot');
+    l.querySelector('.gloss').classList.add('hidden');
+    if (bt.step === 1) slot.innerHTML = bt.hide ? `<span class="dots">${esc(dotsOf(p))}</span>` : `<span class="el">${wordsHtml(p)}</span>`;
+    else if (!live.has(i)) slot.innerHTML = `<span class="el known">${esc(TX(p))}</span>`;
+    else if (bt.step === 2) {
+      slot.innerHTML = `<textarea id="in-${i}" lang="${esc(M.lang || 'el')}" rows="2" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(p.ru)}"></textarea>`;
+      if (keep && keep[i]) slot.querySelector('textarea').value = keep[i];
+    } else {
+      const r = bt.res[i];
+      slot.innerHTML = `<div class="cmp">${r.a ? `<span class="el you">${r.d.u}</span>` : ''}<span class="el">${r.a ? r.d.o : `<span class="miss">${esc(TX(p))}</span>`}</span><span class="grade ${r.g}">${GRADE_LBL[r.g]}</span></div>`;
+    }
   });
-  window.scrollTo(0, 0);
+  if (bt.step === 1) {
+    document.querySelectorAll('#bLines .line').forEach(l => {
+      const i = +l.dataset.i, el = l.querySelector('.slot > .el');
+      if (el) el.onclick = ev => {
+        const w = ev.target.closest('.w');
+        if (w) { const g = l.querySelector('.gloss'); g.innerHTML = glossHtml(P[i].words[+w.dataset.k]); g.classList.remove('hidden'); pickWord($('bLines'), w); return; }
+        toggle(l, () => { playBy(l, i, G.rate, () => l.classList.remove('playing')); l.classList.add('playing'); });
+      };
+    });
+  }
+  paintEye($('bEye'), bt.hide, 'оригинал');
+  $('bS1').classList.toggle('hidden', bt.step !== 1);
+  $('bCheck').classList.toggle('hidden', bt.step !== 2);
+  $('bS3').classList.toggle('hidden', bt.step !== 3);
+  if (bt.step === 3) {
+    const bad = btIdx().some(i => bt.res[i].g === 'r');
+    $('bOn').classList.toggle('hidden', bad);
+    $('bOn').textContent = bt.c + 1 < CHUNKS.length ? 'Дальше' : 'Готово';
+  }
+  paintSpeed(); paintOwner();
 }
-$('b1Play').onclick = () => toggle($('b1Play'), () => playSeq($('b1Play'), CHUNKS[bc], G.rate, i => { const l = document.querySelector(`#b1Lines .line[data-i="${i}"]`); l && l.classList.add('playing'); }));
-$('b1Next').onclick = () => { stop(); $('b1').classList.add('hidden'); $('b2').classList.remove('hidden'); renderB2(); window.scrollTo(0, 0); };
-function renderB2() {
-  document.querySelectorAll('#inMode button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.i === G.input)));
-  const text = G.input === 'text';
-  $('b2Lines').innerHTML = CHUNKS[bc].map(i => `<div class="line"><span class="ru">${esc(P[i].ru)}</span>${text ? `<textarea id="in-${i}" lang="${esc(M.lang || 'el')}" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(P[i].ru)}"></textarea>` : ''}</div>`).join('');
-  $('b2Next').textContent = text ? 'Сверить' : 'Сказал(а) — сверить';
-  $('b2Hint').textContent = 'Скажите ' + LG(M).say;
-}
-document.querySelectorAll('#inMode button').forEach(b => b.onclick = () => {
-  const keep = {}; document.querySelectorAll('#b2Lines textarea').forEach(t => keep[t.id] = t.value);
-  G.input = b.dataset.i; saveG(); renderB2();
-  Object.keys(keep).forEach(id => { const t = $(id); if (t) t.value = keep[id]; });
-});
-$('b2Next').onclick = () => {
-  const answers = {};
-  CHUNKS[bc].forEach(i => { const t = $('in-' + i); if (t && t.value.trim()) { answers[i] = t.value.trim(); S.written[P[i].id] = answers[i]; touch(M, S, P[i].id); } });
-  save();
-  $('b2').classList.add('hidden'); $('b3').classList.remove('hidden'); renderB3(answers); window.scrollTo(0, 0);
+$('bPlay').onclick = () => toggle($('bPlay'), () => playSeq($('bPlay'), CHUNKS[bt.c], G.rate, i => { const l = document.querySelector(`#bLines .line[data-i="${i}"]`); l && l.classList.add('playing'); }));
+$('bEye').onclick = () => { bt.hide = !bt.hide; btRender(); };
+$('bNext').onclick = () => {
+  stop(); bt.step = 2; btRender();
+  const f = document.querySelector('#bLines textarea'); if (f) f.focus({ preventScroll: true });
+  if (!btIdx().length) $('bCheck').click();  /* весь кусок «выучено» — сверять нечего */
+};
+$('bCheck').onclick = () => {
+  const first = bt.tries === 0;
+  btIdx().forEach(i => {
+    const t = $('in-' + i), a = t ? t.value.trim() : '';
+    const d = a ? diff(a, TX(P[i]), M.lang) : null;
+    bt.res[i] = { a, d, g: d ? d.g : 'r' };
+    if (first) {  /* оценка — по первой попытке: цвет, написанное, журнал */
+      if (a) S.written[P[i].id] = a;
+      mark(i, bt.res[i].g, 'bt');
+    }
+  });
+  bt.tries++; save();
+  bt.step = 3; btRender(); paintLrn(); window.scrollTo(0, 0);
+};
+/* «Ещё раз»: поля фраз с ошибками пустеют, верные («знаю») остаются заполненными */
+$('bAgain').onclick = () => {
+  const keep = {}; btIdx().forEach(i => { if (bt.res[i].g === 'g') keep[i] = bt.res[i].a; });
+  bt.step = 2; btRender(keep); window.scrollTo(0, 0);
+  const f = [...document.querySelectorAll('#bLines textarea')].find(t => !t.value); if (f) f.focus({ preventScroll: true });
+};
+$('bOn').onclick = () => {
+  const last = bt.c + 1 >= CHUNKS.length;
+  S.btAt = (bt.c + 1) % CHUNKS.length; save();
+  last ? goBack(M.id) : btOpen(S.btAt);
 };
 
 /* сверка написанного: слова сводятся с оригиналом (одинаковые — и похожие, если совпадает хотя бы половина букв),
@@ -597,6 +674,18 @@ function sim(u, o) {  /* 2 — то же слово (без ударений), �
   const v = 1 - lev(A, B)[A.length][B.length] / Math.max(A.length, B.length);
   return v >= .5 ? v : -1;
 }
+/* служебные слова длиннее трёх букв: ошибка в них — «не знаю», одна буква меняет слово (στον / στην); короче четырёх — служебные все */
+const FUNC = new Set(['στον', 'στην', 'στουσ', 'στισ', 'στων', 'αυτοσ', 'αυτη', 'αυτο', 'αυτου', 'αυτησ', 'αυτον', 'αυτην', 'αυτοι', 'αυτεσ', 'αυτα', 'αυτων', 'αυτουσ',
+  'εμεισ', 'εσεισ', 'εμενα', 'εσενα', 'ενασ', 'εναν', 'ενοσ', 'μιασ', 'μιαν', 'τουσ', 'προσ', 'χωρισ', 'μεχρι', 'κατα', 'μετα', 'παρα', 'αντι', 'οποιοσ', 'οποια', 'οποιο', 'ποιοσ', 'ποια', 'ποιο',
+  'this', 'that', 'these', 'those', 'them', 'they', 'their', 'theirs', 'your', 'yours', 'with', 'from', 'into', 'onto', 'over', 'about', 'what', 'which', 'whom', 'whose']);
+/* оценка слова: 0 — верно (ошибки только в ударениях — тоже верно), 1 — одна буква в смысловом слове длиннее трёх букв, 2 — иначе */
+function wordGrade(u, o) {
+  const A = gl(u).map(gb), B = gl(o).map(gb), d = lev(A, B)[A.length][B.length];
+  if (!d) return 0;
+  return d === 1 && B.length > 3 && !FUNC.has(B.join('')) ? 1 : 2;
+}
+/* сверка письма → { u, o — разметка своего и верного; g — оценка фразы: g «знаю», y «с трудом», r «не знаю» }
+   «не знаю» — пропущенное слово, своё вместо верного, лишнее, две и больше ошибки в слове, ошибка в служебном слове */
 function diff(user, orig, lang) {
   /* слова раскладываются на части (у греческого часть — само слово); части сводятся с оригиналом; слово, все части которого
      совпали, — верное; слово из одной части против слова из одной части — с разметкой букв; иначе — целиком лишнее/пропущенное */
@@ -616,56 +705,28 @@ function diff(user, orig, lang) {
     else j++;
   }
   const U = A.map(x => `<span class="bad">${esc(x.w)}</span>`), O = B.map(x => `<span class="miss">${esc(x.w)}</span>`);
+  const okU = new Array(A.length).fill(false), gw = new Array(B.length).fill(2);
   const own = (P, k) => P.map((x, q) => x.k === k ? q : -1).filter(q => q >= 0);
   B.forEach((x, k) => {
     const qs = own(pb, k), q0 = mb[qs[0]], ka0 = q0 !== null ? pa[q0].k : -1;
     if (qs.length === 1 && q0 !== null && A[ka0].parts.length === 1) {  /* слово против слова — по буквам (ударение — пометкой) */
-      if (lang === 'en' && pa[q0].p === pb[qs[0]].p) { U[ka0] = esc(A[ka0].w); O[k] = esc(x.w); }  /* colour = color, I = i */
-      else [U[ka0], O[k]] = charDiff(A[ka0].w, x.w);
+      if (lang === 'en' && pa[q0].p === pb[qs[0]].p) { U[ka0] = esc(A[ka0].w); O[k] = esc(x.w); gw[k] = 0; }  /* colour = color, I = i */
+      else { [U[ka0], O[k]] = charDiff(A[ka0].w, x.w); gw[k] = wordGrade(A[ka0].w, x.w); }
+      okU[ka0] = true;
     } else if (qs.every(q => mb[q] !== null && pa[mb[q]].p === pb[q].p)) {  /* все части совпали — верно, как бы ни было записано (I'm = I am) */
-      O[k] = esc(x.w);
-      qs.forEach(q => { const ka = pa[mb[q]].k; if (own(pa, ka).every(r => ma[r] !== null && pa[r].p === pb[ma[r]].p)) U[ka] = esc(A[ka].w); });
+      O[k] = esc(x.w); gw[k] = 0;
+      qs.forEach(q => { const ka = pa[mb[q]].k; okU[ka] = true; if (own(pa, ka).every(r => ma[r] !== null && pa[r].p === pb[ma[r]].p)) U[ka] = esc(A[ka].w); });
     } else {  /* сокращение без апострофа (doesnt) — по буквам: выделяется только недостающий апостроф */
       const bare = w => w.toLowerCase().replace(/'/g, '');
       const ka = qs.map(q => mb[q]).filter(r => r !== null).map(r => pa[r].k).find(t => bare(A[t].w) === bare(x.w));
-      if (ka !== undefined) [U[ka], O[k]] = charDiff(A[ka].w, x.w);
+      if (ka !== undefined) { [U[ka], O[k]] = charDiff(A[ka].w, x.w); gw[k] = wordGrade(A[ka].w, x.w); okU[ka] = true; }
     }
   });
-  return { u: U.join(' '), o: O.join(' ') };
+  /* часть слова-сокращения, сведённая с верным словом, — не лишнее */
+  pa.forEach((x, q) => { if (ma[q] !== null) okU[x.k] = true; });
+  const worst = Math.max(0, ...gw, ...okU.map(v => v ? 0 : 2));
+  return { u: U.join(' '), o: O.join(' '), g: ['g', 'y', 'r'][worst] };
 }
-function renderB3(answers) {
-  $('b3Lines').innerHTML = CHUNKS[bc].map(i => {
-    const p = P[i], a = answers[i];
-    const d = a ? diff(a, TX(p), M.lang) : null;
-    return `<div class="cmp" data-i="${i}">
-      <span class="ru">${esc(p.ru)}</span>
-      ${a ? `<span class="el you">${d.u}</span>` : ''}
-      <span class="el">${d ? d.o : esc(TX(p))}</span>
-      <div class="colors sm"><button class="g" data-c="g" aria-pressed="false">Знаю</button><button class="y" data-c="y" aria-pressed="false">Повторить</button><button class="r" data-c="r" aria-pressed="false">Трудно</button></div>
-    </div>`;
-  }).join('');
-  document.querySelectorAll('#b3Lines .cmp').forEach(row => {
-    const i = +row.dataset.i;
-    row.querySelectorAll('.colors button').forEach(b => b.onclick = () => {
-      bColors[i] = b.dataset.c;
-      row.querySelectorAll('.colors button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-      updB3();
-    });
-  });
-  updB3();
-}
-function updB3() {
-  const left = CHUNKS[bc].filter(i => !bColors[i]).length;
-  $('b3Next').disabled = left > 0;
-  $('b3Next').textContent = left ? `Поставьте цвет: осталось ${left}` : (bc + 1 < CHUNKS.length ? 'Следующий кусок' : 'Готово — к тексту');
-}
-$('b3Next').onclick = () => {
-  CHUNKS[bc].forEach(i => mark(i, bColors[i], 'bt' + (G.input === 'text' ? '-письмо' : '-голос')));
-  const last = bc + 1 >= CHUNKS.length;
-  S.btAt = (bc + 1) % CHUNKS.length; save();
-  last ? goBack(M.id) : btOpen(S.btAt);
-};
-
 /* --- тема: авто (как в системе) · светлая · тёмная --- */
 const THEMES = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
 function paintTheme() {
