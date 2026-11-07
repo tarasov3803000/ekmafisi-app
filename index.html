@@ -16,7 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
-<script>/* крупный шрифт +1/+2/+3 px — до первой отрисовки; прежний переключатель «вкл» (ekmafisi-big = 1) — это +3 */
+<script>/* крупный шрифт +1…+5 px — до первой отрисовки; прежний переключатель «вкл» (ekmafisi-big = 1) — это +3 */
 try { const u = localStorage.getItem('ekmafisi-up') ?? (localStorage.getItem('ekmafisi-big') === '1' ? '3' : '0'); document.documentElement.style.setProperty('--up', (+u || 0) + 'px'); } catch (e) {}</script>
 <style>
 /* Экмафиси (PWA, выросла из пробной страницы): один столбец под телефон; полка текстов → текст → режим. Греческий — книжным шрифтом крупно, остальное тихо. */
@@ -35,7 +35,7 @@ try { const u = localStorage.getItem('ekmafisi-up') ?? (localStorage.getItem('ek
   --aegean: #1a6d9c;  /* написанное человеком на сверке — эгейский синий */
   --f-el: "Literata", "Noto Serif", Georgia, serif;
   --f-ui: "Manrope", "Noto Sans", system-ui, sans-serif;
-  --up: 0px;  /* «Крупный шрифт» в настройках: +1, +2 или +3 px ко всем текстам */
+  --up: 0px;  /* «Шрифт» в настройках: +1…+5 px ко всем текстам */
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -159,10 +159,29 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .sub { color: var(--muted); font-size: calc(15px + var(--up)); margin-top: -12px; }  /* подпись режима под заголовком */
 .vh { visibility: hidden; }  /* скрытый греческий держит своё место: русский не прыгает */
 .pcard { position: relative; }
-.lrn { position: absolute; top: 6px; right: 6px; width: 40px; height: 40px; border: 0; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; border-radius: 10px; }
+/* значки растут вместе с кеглем (+2 px на ступень при +1 px у текста): места друг относительно друга не меняются */
+.lrn { position: absolute; top: 6px; right: 6px; width: calc(40px + 2 * var(--up)); height: calc(40px + 2 * var(--up)); border: 0; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; border-radius: 10px; }
+.lrn svg { width: 65%; height: 65%; }
 .lrn[aria-pressed="true"] { color: var(--g); }
-.line.has-lrn { position: relative; padding-right: 40px; }
-.line .lrn { top: -6px; right: -6px; }
+.pcard > #sText, .pcard > #sRu { margin-right: calc(34px + 2 * var(--up)); }  /* «Повторение»: место под «выучено» — текст под значок не заходит */
+/* «Обратный перевод»: строка — сетка; справа свой столбец: выучено · трудно · не знаю · глаз */
+.line.has-mk { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: start; }
+.line.has-mk > .slot { grid-column: 1; grid-row: 1; }
+.line.has-mk > .ru-line { grid-column: 1; grid-row: 2; }
+.line.has-mk > .marks { grid-column: 2; grid-row: 1 / span 2; }
+.line.has-mk > .gloss { grid-column: 1 / -1; }
+.marks { display: grid; gap: 2px; align-content: start; margin: -6px -8px 0 0; }
+.mk { width: calc(38px + 2 * var(--up)); height: calc(38px + 2 * var(--up)); border: 0; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; border-radius: 10px; }
+.mk svg { width: 68%; height: 68%; }
+.mk[data-lrn][aria-pressed="true"] { color: var(--g); background: var(--g-soft); }
+.mk.y { color: var(--y); } .mk.r { color: var(--r); }
+.mk.y[aria-pressed="true"] { background: var(--y-soft); } .mk.r[aria-pressed="true"] { background: var(--r-soft); }
+.mk.eye { color: var(--accent); }
+.mk.eye[aria-pressed="true"] { background: var(--accent-soft); }
+.mk.off { visibility: hidden; }  /* глаз на сверке не нужен, но место держит */
+/* нажатие на русский и греческий — не выделение: иначе Chrome на Android показывает «Поиск по нажатию» */
+#bt .line { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#bt .line textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .dots { font: 400 calc(20px + var(--up))/1.4 var(--f-el); color: var(--muted); letter-spacing: .15em; }
 .grade { justify-self: start; font-size: calc(13px + var(--up)); font-weight: 700; border-radius: 999px; padding: 2px 10px; }
 .grade.g { background: var(--g-soft); color: var(--g); } .grade.y { background: var(--y-soft); color: var(--y); } .grade.r { background: var(--r-soft); color: var(--r); }
@@ -297,8 +316,13 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   </section>
   <section class="card">
     <h2>Шрифт</h2>
-    <div class="seg" id="setBig" role="group" aria-label="Размер шрифта"><button data-up="0">обычный</button><button data-up="1">+1</button><button data-up="2">+2</button><button data-up="3">+3</button></div>
-    <p class="small muted">Все тексты крупнее на одну, две или три ступени. Только на этом устройстве.</p>
+    <div class="seg" id="setBig" role="group" aria-label="Размер шрифта"><button data-up="0">обычный</button><button data-up="1">+1</button><button data-up="2">+2</button><button data-up="3">+3</button><button data-up="4">+4</button><button data-up="5">+5</button></div>
+    <p class="small muted">Все тексты крупнее на одну–пять ступеней. Только на этом устройстве.</p>
+  </section>
+  <section class="card">
+    <h2>Обратный перевод</h2>
+    <div class="seg" id="setBtN" role="group" aria-label="Фраз за раз"><button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button></div>
+    <p class="small muted">Сколько фраз переводить за раз.</p>
   </section>
   <section class="card">
     <h2>Учётная запись</h2>
@@ -375,17 +399,15 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <p class="sub" id="bSub"></p>
   <section class="card">
     <div class="lines" id="bLines"></div>
-    <div id="bS1" style="display:grid;gap:16px">
-      <div class="ctl c4">
-        <button class="ic slower" aria-label="Медленнее"></button>
-        <button class="ic play" id="bPlay" aria-label="Слушать всё"></button>
-        <button class="ic faster" aria-label="Быстрее"></button>
-        <button class="ic eye" id="bEye" aria-pressed="false" aria-label="Скрыть оригинал"></button>
-      </div>
-      <button class="btn primary wide" id="bNext">Далее</button>
+    <div class="ctl c4">
+      <button class="ic slower" aria-label="Медленнее"></button>
+      <button class="ic play" id="bPlay" aria-label="Слушать всё"></button>
+      <button class="ic faster" aria-label="Быстрее"></button>
+      <button class="ic eye" id="bEye" aria-pressed="false" aria-label="Скрыть оригинал"></button>
     </div>
+    <button class="btn primary wide" id="bNext">Далее</button>
     <button class="btn primary wide hidden" id="bCheck">Сверить</button>
-    <div class="row hidden" id="bS3"><button class="btn" id="bAgain" style="flex:1">Ещё раз</button><button class="btn primary" id="bOn" style="flex:1">Дальше</button></div>
+    <div class="row hidden" id="bS3"><button class="btn" id="bAgain" style="flex:1">Ещё раз</button><button class="btn primary" id="bOn" style="flex:1">Далее</button></div>
   </section>
 </main>
 

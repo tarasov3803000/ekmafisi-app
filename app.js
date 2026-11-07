@@ -25,11 +25,11 @@ const read = k => { try { return JSON.parse(localStorage.getItem(userKey(k)) || 
 const write = (k, v) => { try { localStorage.setItem(userKey(k), JSON.stringify(v)); } catch (e) {} };
 /* скорость — лесенка 0,8 · 1 · 1,5 · 2, везде одна */
 const RATES = [0.8, 1, 1.5, 2];
-let G = Object.assign({ rate: 1, last: null, mode: 'skor', theme: 'auto' }, read(SKEY) || {});
+let G = Object.assign({ rate: 1, last: null, mode: 'skor', theme: 'auto', btN: 3 }, read(SKEY) || {});
 if (!RATES.includes(G.rate)) G.rate = G.rate < 1 ? 0.8 : 1;
-/* настройки на сервере — по ключу { v, t }: rate, mode, theme, last; pos.<текст> — где остановился; flags — «Неверно?» */
+/* настройки на сервере — по ключу { v, t }: rate, mode, theme, last, btN (фраз за раз в «Обратном переводе»); pos.<текст> — где остановился; flags — «Неверно?» */
 /* язык обучения — lang; «Продолжить» — свой у каждого языка: last.el, last.en */
-const G_SYNC = ['rate', 'mode', 'theme', 'lang', ...Object.keys(LANGS).map(l => 'last.' + l)];
+const G_SYNC = ['rate', 'mode', 'theme', 'lang', 'btN', ...Object.keys(LANGS).map(l => 'last.' + l)];
 if (G.last) { const m0 = LIB.find(m => m.id === G.last); if (m0 && !G['last.' + m0.lang]) G['last.' + m0.lang] = G.last; delete G.last; }  /* прежний общий last */
 const lastId = () => G.lang && G['last.' + G.lang];
 const TKEY = 'ekmafisi.settings.t';
@@ -45,12 +45,12 @@ G_SYNC.forEach(k => setSynced(k, G[k]));
 const saveG = () => { write(SKEY, G); G_SYNC.forEach(k => setSynced(k, G[k])); };
 const progOf = m => {  /* прогресс прежней нарезки (cut) к новым фразам не относится — начинаем заново */
   const v = read('ekmafisi.' + m.id);
-  return Object.assign({ colors: {}, written: {}, ts: {}, log: [], skorAt: 0, btAt: 0, resetAt: '' }, v && (v.cut || 1) === (m.cut || 1) ? v : {});
+  return Object.assign({ colors: {}, written: {}, ts: {}, log: [], skorAt: 0, btAt: 0, btI: null, resetAt: '' }, v && (v.cut || 1) === (m.cut || 1) ? v : {});
 };
-const writeProg = (m, s) => write('ekmafisi.' + m.id, { cut: m.cut || 1, colors: s.colors, written: s.written, ts: s.ts, log: s.log, skorAt: s.skorAt, btAt: s.btAt, resetAt: s.resetAt });
+const writeProg = (m, s) => write('ekmafisi.' + m.id, { cut: m.cut || 1, colors: s.colors, written: s.written, ts: s.ts, log: s.log, skorAt: s.skorAt, btAt: s.btAt, btI: s.btI, resetAt: s.resetAt });
 
 let M = null, P = [], CHUNKS = [], S = null;
-const save = () => { writeProg(M, S); setSynced('pos.' + M.id, { skorAt: S.skorAt, btAt: S.btAt }); };
+const save = () => { writeProg(M, S); setSynced('pos.' + M.id, { skorAt: S.skorAt, btAt: S.btAt, btI: S.btI }); };
 /* фраза изменилась (цвет или написанное) — строка «человек × текст × фраза» с временем изменения */
 function touch(m, s, pid) {
   s.ts[pid] = now();
@@ -68,20 +68,51 @@ function passed(i) { logAdd(M, S, { p: P[i].id, c: null, m: 'povt' }); save(); }
 const isLearned = (s, pid) => { let v = false; s.log.forEach(x => { if (x.p === pid && (x.m === 'learned' || x.m === 'unlearn')) v = x.m === 'learned'; }); return v; };
 /* «выучено» и не проваленное с тех пор — режимы её пропускают */
 const skipped = (s, pid) => isLearned(s, pid) && s.colors[pid] === 'g';
+/* цвет фразы перед последней отметкой m (learned, self) — по журналу, как его ставил mark: снятие возвращает свой цвет, даже пустой */
+function colorBefore(pid, m) {
+  let cut = -1, col = null;
+  S.log.forEach((x, k) => { if (x.p === pid && x.m === m) cut = k; });
+  S.log.slice(0, cut).forEach(x => { if (x.p !== pid) return; if (['learned', 'unlearn', 'self', 'unself'].includes(x.m)) col = x.c || null; else if (x.c) col = x.c; });
+  return col;
+}
 function toggleLearned(i) {
   const pid = P[i].id;
   if (!isLearned(S, pid)) { mark(i, 'g', 'learned'); return true; }
-  let prev = null, cut = -1;
-  S.log.forEach((x, k) => { if (x.p === pid && x.m === 'learned') cut = k; });
-  S.log.slice(0, cut).forEach(x => { if (x.p === pid && x.c) prev = x.c; });
-  mark(i, prev, 'unlearn'); return false;
+  mark(i, colorBefore(pid, 'learned'), 'unlearn'); return false;
 }
 const ICO_LRN = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9.5 12 5l10 4.5L12 14z"/><path d="M6 11.5V16c0 1.4 2.7 3 6 3s6-1.6 6-3v-4.5"/><path d="M22 9.5V15"/></svg>';
 const lrnBtn = (cls, i) => `<button class="${cls}" data-lrn="${i}" aria-pressed="${isLearned(S, P[i].id)}" aria-label="Выучено — уже знаю">${ICO_LRN}</button>`;
-function paintLrn() { document.querySelectorAll('[data-lrn]').forEach(b => b.setAttribute('aria-pressed', String(isLearned(S, P[+b.dataset.lrn].id)))); }
+/* «трудно» и «не знаю» — отметки самому себе (Ваше слово, 7 ноября 2026): подсмотрел и перевёл — а сам знает, что не знает.
+   Цвет y/r в журнал с режимом self, для FSRS — Hard/Again (не знаю — вернётся завтра). Нажата отметка, поставленная сегодня,
+   если после неё не было другой оценки; повторное нажатие снимает (unself) — цвет каким был до неё */
+const selfOf = (s, pid) => {
+  let v = null, t = '';
+  s.log.forEach(x => { if (x.p !== pid) return; if (x.m === 'self') { v = x.c; t = x.t; } else if (x.c || ['unself', 'learned', 'unlearn'].includes(x.m)) v = null; });
+  return v && dayOf(tOf({ t })).getTime() === dayOf(Date.now()).getTime() ? v : null;
+};
+function toggleSelf(i, c) {
+  const pid = P[i].id;
+  if (selfOf(S, pid) === c) { mark(i, colorBefore(pid, 'self'), 'unself'); return; }
+  if (isLearned(S, pid)) toggleLearned(i);  /* «выучено» и «не знаю» вместе не бывают */
+  mark(i, c, 'self');
+}
+function paintMarks() {
+  document.querySelectorAll('[data-lrn]').forEach(b => b.setAttribute('aria-pressed', String(isLearned(S, P[+b.dataset.lrn].id))));
+  document.querySelectorAll('[data-self]').forEach(b => b.setAttribute('aria-pressed', String(selfOf(S, P[+b.dataset.self].id) === b.dataset.c)));
+}
+const paintLrn = paintMarks;
 document.addEventListener('click', e => {
-  const b = e.target.closest('[data-lrn]'); if (!b || !M) return;
-  e.stopPropagation(); toggleLearned(+b.dataset.lrn); paintLrn();
+  const b = e.target.closest('[data-lrn]'), y = e.target.closest('[data-self]'); if ((!b && !y) || !M) return;
+  e.stopPropagation();
+  if (b) toggleLearned(+b.dataset.lrn);
+  else {
+    const i = +y.dataset.self; toggleSelf(i, y.dataset.c);
+    if (shown('bt')) {  /* отметку сняли после сверки — в силе снова оценка сверки */
+      bt.self[i] = true;
+      if (bt.held[i] && !selfOf(S, P[i].id)) { delete bt.held[i]; mark(i, bt.res[i].g, 'bt'); }
+    }
+  }
+  paintMarks();
   if (shown('home')) renderHome();
 });
 function mark(i, c, mode) {  /* c — g/y/r; null — без цвета («выучено» снято, а цвета до него не было) */
@@ -220,7 +251,7 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
   else {
     const fresh = !M || M.id !== t.id;
     if (fresh) setText(t.id);
-    if (force || fresh || !shown(t.v)) t.v === 'home' ? show('home') : t.v === 'bt' ? btOpen(S.btAt) : skorOpen(S.skorAt);
+    if (force || fresh || !shown(t.v)) t.v === 'home' ? show('home') : t.v === 'bt' ? btOpenAt(btPos()) : skorOpen(S.skorAt);
   }
   sh ? openSheet(sh) : closeSheet();
 }
@@ -269,9 +300,11 @@ $('setOpen').onclick = () => { push('settings'); show('settings'); };
 function renderSettings() {
   document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
   document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
+  document.querySelectorAll('#setBtN button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.n === (G.btN || 3))));
 }
+document.querySelectorAll('#setBtN button').forEach(b => b.onclick = () => { G.btN = +b.dataset.n; saveG(); renderSettings(); });
 document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
-/* крупный шрифт: +1, +2 или +3 px ко всем текстам, как в читалке; только на этом устройстве (экраны телефона и Мака разные),
+/* крупный шрифт: +1…+5 px ко всем текстам, как в читалке (+4 и +5 — для планшета); только на этом устройстве (экраны телефона и Мака разные),
    ключ вне учётной записи — читается до входа (index.html) */
 const UP = 'ekmafisi-up';
 const upNow = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue('--up')) || 0;
@@ -313,7 +346,7 @@ document.querySelectorAll('.mode').forEach(b => b.onclick = () => start(b.datase
 $('run').onclick = () => start(G.mode);
 function start(mode, i) {  /* i — с какой фразы; без него — с того места, где остановились */
   G.mode = mode; saveG(); push(M.id + '-' + mode);
-  if (mode === 'bt') btOpen(i === undefined ? S.btAt : Math.max(0, CHUNKS.findIndex(c => c.includes(i))), i !== undefined);
+  if (mode === 'bt') btOpenAt(i === undefined ? btPos() : i, i !== undefined);
   else skorOpen(i === undefined ? S.skorAt : i);
 }
 
@@ -340,7 +373,7 @@ $('resetNo').onclick = () => $('resetWrap').classList.add('hidden');
 $('resetYes').onclick = () => {
   const ids = new Set([...Object.keys(S.colors), ...Object.keys(S.written)]);
   const at = now(), id = uuid();
-  S = { colors: {}, written: {}, ts: S.ts, log: [], skorAt: 0, btAt: 0, resetAt: at };
+  S = { colors: {}, written: {}, ts: S.ts, log: [], skorAt: 0, btAt: 0, btI: 0, resetAt: at };
   ids.forEach(pid => touch(M, S, pid));
   EK.queueLog({ id, at, kind: 'reset', lang: M.lang || 'el', text_id: M.id });
   save();
@@ -401,9 +434,23 @@ const lexOf = l => { for (const m of LIB) if ((!M || m.lang === M.lang) && m.lex
 const phraseOf = l => { for (const m of [M, ...LIB].filter(x => x && (!M || x.lang === M.lang))) for (const p of m.phrases) if (p.words.some(w => w.l === l)) return p; return null; };
 const EKEY = 'ekmafisi.etym', FKEY = 'ekmafisi.etymflags';
 let sheetNow = null;
-function openEtym(l) {
+/* на широком экране (от 720 px) статья открывается здесь же, под фразой — в месте карточки слова; на узком — окном поверх */
+const WIDE = matchMedia('(min-width: 720px)');
+function inlineBox(src) {
+  if (!WIDE.matches || !src || src.closest('.sheet')) return null;
+  const l = src.closest('.line'); if (l && l.querySelector('.gloss')) return l.querySelector('.gloss');
+  return src.closest('.gloss') || (src.closest('#sText') ? $('sGloss') : null);
+}
+function showInline(box, src, fn) {
+  fn(box); box.classList.remove('hidden');
+  const w = src && src.closest('.w'); if (w) pickWord(w.closest('main') || document, w);
+  box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function openEtym(l, src) {  /* src — откуда открыто: слово или ссылка; по нему — место статьи на широком экране */
   const log = read(EKEY) || [];
   if (LEX[l]) { const id = uuid(), at = now(); log.push({ id, l, t: at.slice(0, 16) }); write(EKEY, log); EK.queueLog({ id, at, kind: 'etym', lang: (M && M.lang) || 'el', lemma: l }); }
+  const box = inlineBox(src);
+  if (box) return showInline(box, src, b => renderEtym(l, b));
   push(curHash(), { k: 'etym', l }); openSheet(history.state.sheet);
 }
 function openSheet(sh) {
@@ -413,7 +460,8 @@ function openSheet(sh) {
 }
 function closeSheet() { sheetNow = null; $('etym').classList.add('hidden'); document.body.style.overflow = ''; }
 $('eHist').onclick = () => { if (!sheetNow || sheetNow.k !== 'hist') { push(curHash(), { k: 'hist' }); openSheet(history.state.sheet); } };
-const elLink = s => { const cur = sheetNow && sheetNow.l; const k = Object.keys(LEX).find(l => base(l) === base(s) && l !== cur); return k ? `<button class="link el" data-etym="${esc(k)}">${esc(s)}</button>` : `<span class="el">${esc(s)}</span>`; };
+let etymCur = null;  /* чья статья на виду — на себя ссылкой не ведёт */
+const elLink = s => { const cur = etymCur; const k = Object.keys(LEX).find(l => base(l) === base(s) && l !== cur); return k ? `<button class="link el" data-etym="${esc(k)}">${esc(s)}</button>` : `<span class="el">${esc(s)}</span>`; };
 const sec = (t, body) => body ? `<section class="e-sec"><h2>${t}</h2>${body}</section>` : '';
 function headHtml(l, D) {
   const L = lexOf(l) || {}, p = phraseOf(l), forms = formsOf(L, D);
@@ -421,19 +469,20 @@ function headHtml(l, D) {
       ${forms ? `<span class="el muted">${esc(forms)}</span>` : ''}
       ${p ? `<span class="small muted"><span class="el">${esc(TX(p))}</span></span>` : ''}</div>`;
 }
-function renderSenses(l) {
-  const D = LEX[l];
-  $('eTtl').textContent = 'Значения';
-  if (!D) { $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статьи пока нет.</p>`; return; }
-  $('eBody').innerHTML = headHtml(l, D) + sensesHtml(D.dict) + `<div class="e-foot"><span>Значения написаны ИИ (Claude) по Викисловарю (CC BY-SA); человеком — не проверено.</span></div>`;
+/* box — место под фразой (широкий экран); без него — окно поверх */
+const boxOf = (box, ttl) => { if (box) return [box, `<h2>${ttl}</h2>`]; $('eTtl').textContent = ttl; return [$('eBody'), '']; };
+function renderSenses(l, inl) {
+  const D = LEX[l], [box, top] = boxOf(inl, 'Значения');
+  if (!D) { box.innerHTML = top + `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статьи пока нет.</p>`; return; }
+  box.innerHTML = top + headHtml(l, D) + sensesHtml(D.dict) + `<div class="e-foot"><span>Значения написаны ИИ (Claude) по Викисловарю (CC BY-SA); человеком — не проверено.</span></div>`;
 }
-function renderEtym(l) {
-  const D = LEX[l];
-  $('eTtl').textContent = 'Происхождение';
-  if (!D) { $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">${M && M.lang !== 'el' ? 'Статей о происхождении для этого языка пока нет.' : 'Статьи пока нет: в пробе — 50 слов «Ёлки» и βάζω.'}</p>`; return; }
+function renderEtym(l, inl) {
+  const D = LEX[l], [box, top] = boxOf(inl, 'Происхождение'), q = id => box.querySelector('#' + id);
+  etymCur = l;
+  if (!D) { box.innerHTML = top + `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">${M && M.lang !== 'el' ? 'Статей о происхождении для этого языка пока нет.' : 'Статьи пока нет: в пробе — 50 слов «Ёлки» и βάζω.'}</p>`; return; }
   const e = D.etym;
   const END = { unknown: 'Дальше происхождение неизвестно.', reconstruction_only: 'Дальше — только реконструкции; их не приводим.' };
-  $('eBody').innerHTML = headHtml(l, D) + `
+  box.innerHTML = top + headHtml(l, D) + `
     ${sec('Состав', e.parts && `<p>${esc(e.parts)}</p>`)}
     ${sec('Происхождение', (e.chain.length ? '<ul class="chain">' + e.chain.map(c => `<li><span class="st">${esc(c.stage)}</span><span>${elLink(c.form)} — ${esc(c.meaning)}</span></li>`).join('') + '</ul>' : '')
       + (END[e.chain_end] ? `<p class="muted small">${END[e.chain_end]}</p>` : '') + (e.shift ? `<p>${esc(e.shift)}</p>` : ''))}
@@ -446,12 +495,12 @@ function renderEtym(l) {
     <div class="e-sec"><button class="link" id="eFlag" style="justify-self:start">Неверно?</button>
       <div id="eFlagBox" class="hidden" style="display:grid;gap:8px"><textarea id="eFlagText" placeholder="Что не так — коротко"></textarea><button class="btn" id="eFlagSave">Сохранить</button></div></div>`;
   const flags = read(FKEY) || {};
-  if (flags[l]) { $('eFlagText').value = flags[l].text; $('eFlag').textContent = 'Отмечено: неверно — изменить'; }
-  $('eFlag').onclick = () => $('eFlagBox').classList.remove('hidden');
-  $('eFlagSave').onclick = () => {
-    const f = read(FKEY) || {}, t = $('eFlagText').value.trim();
+  if (flags[l]) { q('eFlagText').value = flags[l].text; q('eFlag').textContent = 'Отмечено: неверно — изменить'; }
+  q('eFlag').onclick = () => q('eFlagBox').classList.remove('hidden');
+  q('eFlagSave').onclick = () => {
+    const f = read(FKEY) || {}, t = q('eFlagText').value.trim();
     if (t) f[l] = { text: t, t: new Date().toISOString().slice(0, 16) }; else delete f[l];
-    write(FKEY, f); setSynced('flags', f); $('eFlagBox').classList.add('hidden'); $('eFlag').textContent = t ? 'Отмечено: неверно — изменить' : 'Неверно?';
+    write(FKEY, f); setSynced('flags', f); q('eFlagBox').classList.add('hidden'); q('eFlag').textContent = t ? 'Отмечено: неверно — изменить' : 'Неверно?';
   };
 }
 function renderHist() {
@@ -471,16 +520,22 @@ function renderHist() {
 /* нажатия внутри карточки и окон — одним слушателем: «Значения» и data-etym открывают своё окно */
 document.addEventListener('click', e => {
   const s = e.target.closest('[data-senses]');
-  if (s) { push(curHash(), { k: 'senses', l: s.dataset.senses }); openSheet(history.state.sheet); return; }
+  if (s) { const box = inlineBox(s); if (box) showInline(box, null, b => renderSenses(s.dataset.senses, b)); else { push(curHash(), { k: 'senses', l: s.dataset.senses }); openSheet(history.state.sheet); } return; }
   const a = e.target.closest('[data-etym]');
-  if (a) { e.stopPropagation(); openEtym(a.dataset.etym); }
+  if (a) { e.stopPropagation(); openEtym(a.dataset.etym, a); }
+});
+/* карточка слова и статья под фразой закрываются нажатием мимо них (нажатие, перерисовавшее экран, — не в счёт) */
+document.addEventListener('click', e => {
+  if (!e.target.isConnected || e.target.closest('.gloss, .w, .sheet')) return;
+  document.querySelectorAll('.gloss:not(.hidden)').forEach(g => g.classList.add('hidden'));
+  document.querySelectorAll('.w.sel').forEach(x => x.classList.remove('sel'));
 });
 /* долгое нажатие на слово (≈ 450 мс) — сразу статья; обычное — карточка, как прежде */
 let lp = null;
 document.addEventListener('pointerdown', e => {
   const w = e.target.closest('.w'); if (!w || e.button > 0) return;
   w.classList.add('hold');
-  lp = { w, x: e.clientX, y: e.clientY, fired: false, t: setTimeout(() => { lp.fired = true; w.classList.remove('hold'); openEtym(w.dataset.l); }, 450) };
+  lp = { w, x: e.clientX, y: e.clientY, fired: false, t: setTimeout(() => { lp.fired = true; w.classList.remove('hold'); openEtym(w.dataset.l, w); }, 450) };
 });
 const lpCancel = () => {  /* после сработавшего долгого нажатия глотаем только ближайший click: на телефоне его может и не быть */
   if (!lp) return; clearTimeout(lp.t); lp.w.classList.remove('hold');
@@ -557,90 +612,136 @@ $('sDone').onclick = () => {
   sk.i = S.skorAt; skorRender(); window.scrollTo(0, 0);
 };
 
-/* --- Обратный перевод: один экран — шаг 1 (читать и слушать, глаз скрывает оригинал), шаг 2 (поле на каждую фразу), сверка ---
+/* --- Обратный перевод: один экран — шаг 1 (читать и слушать), шаг 2 (поле на каждую фразу), шаг 3 — сверка ---
    Русский и греческий не двигаются: на месте греческого — точки (по одной на слово), потом поля, потом сверка.
-   Оценку ставит сверка, по первой попытке; «Ещё раз» её не меняет. Фразы с «выучено» полей не получают. */
-let bt = { c: 0, step: 1, hide: false, tries: 0, res: {} };
-const btIdx = () => CHUNKS[bt.c].filter(i => !skipped(S, P[i].id));
-const dotsOf = p => (TX(p).match(/\S+/g) || []).map(() => '•').join(' ');
-const GRADE_LBL = { g: 'знаю', y: 'с трудом', r: 'не знаю' };
-function btOpen(c, exact) {  /* exact — открыт «›» у фразы: кусок с ней, даже если вся она «выучено» */
-  show('bt');
-  c = c % CHUNKS.length;
-  if (!exact) for (let k = 0; k < CHUNKS.length && CHUNKS[c].every(i => skipped(S, P[i].id)); k++) c = (c + 1) % CHUNKS.length;
-  bt = { c, step: 1, hide: false, tries: 0, res: {} };
-  $('bCnt').textContent = `кусок ${c + 1} / ${CHUNKS.length}`;
-  $('bSub').textContent = `Переведите фразу ${LG(M).to}, не глядя на оригинал`;
-  $('bLines').innerHTML = CHUNKS[c].map(i => `<div class="line has-lrn" data-i="${i}">${lrnBtn('lrn', i)}<div class="slot"></div><span class="ru-line">${esc(P[i].ru)}</span><div class="gloss hidden"></div></div>`).join('');
-  btRender(); window.scrollTo(0, 0);
-}
-function btRender(keep) {  /* keep — что оставить в полях при «Ещё раз» */
-  const live = new Set(btIdx());
-  document.querySelectorAll('#bLines .line').forEach(l => {
-    const i = +l.dataset.i, p = P[i], slot = l.querySelector('.slot');
-    l.querySelector('.gloss').classList.add('hidden');
-    if (bt.step === 1) slot.innerHTML = bt.hide ? `<span class="dots">${esc(dotsOf(p))}</span>` : `<span class="el">${wordsHtml(p)}</span>`;
-    else if (!live.has(i)) slot.innerHTML = `<span class="el known">${esc(TX(p))}</span>`;
-    else if (bt.step === 2) {
-      slot.innerHTML = `<textarea id="in-${i}" lang="${esc(M.lang || 'el')}" rows="2" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(p.ru)}"></textarea>`;
-      if (keep && keep[i]) slot.querySelector('textarea').value = keep[i];
-    } else {
-      const r = bt.res[i];
-      slot.innerHTML = `<div class="cmp">${r.a ? `<span class="el you">${r.d.u}</span>` : ''}<span class="el">${r.a ? r.d.o : `<span class="miss">${esc(TX(p))}</span>`}</span><span class="grade ${r.g}">${GRADE_LBL[r.g]}</span></div>`;
-    }
-  });
-  if (bt.step === 1) {
-    document.querySelectorAll('#bLines .line').forEach(l => {
-      const i = +l.dataset.i, el = l.querySelector('.slot > .el');
-      if (el) el.onclick = ev => {
-        const w = ev.target.closest('.w');
-        if (w) { const g = l.querySelector('.gloss'); g.innerHTML = glossHtml(P[i].words[+w.dataset.k]); g.classList.remove('hidden'); pickWord($('bLines'), w); return; }
-        toggle(l, () => { playBy(l, i, G.rate, () => l.classList.remove('playing')); l.classList.add('playing'); });
-      };
+   Справа у фразы столбец: «выучено» · «трудно» · «не знаю» · глаз. Глаз на шаге 2 — «или-или»: виден оригинал — поля нет,
+   скрыт — поле с написанным (Ваше слово, 7 ноября 2026). Под фразами — звук на всех шагах, ниже — кнопки шага.
+   Оценку ставит сверка, по первой попытке; «Ещё раз» её не меняет; «трудно»/«не знаю», нажатые в этом куске, сверка не перебивает.
+   Фразы с «выучено» полей не получают. */
+let bt = { c: 0, step: 1, hid: {}, tries: 0, res: {}, self: {}, held: {} };  /* held — оценка сверки, уступившая своей отметке */
+/* куски по настройке «фраз за раз» (1–3): кусок текста (по смыслу) режется ровно, не больше N фраз, через свою границу не переходит */
+let btK = [], btKey = '';
+function btPieces() {
+  const n = G.btN || 3, key = M.id + ':' + n;
+  if (btKey !== key) {
+    btK = []; btKey = key;
+    CHUNKS.forEach(ch => {
+      const parts = Math.ceil(ch.length / n), b = Math.floor(ch.length / parts), x = ch.length % parts;
+      for (let k = 0, at = 0; k < parts; k++) { const len = b + (k < x ? 1 : 0); btK.push(ch.slice(at, at + len)); at += len; }
     });
   }
-  paintEye($('bEye'), bt.hide, 'оригинал');
-  $('bS1').classList.toggle('hidden', bt.step !== 1);
+  return btK;
+}
+/* где остановился — номер фразы (btI): не зависит от «фраз за раз»; прежний btAt — номер куска текста, его держим для старых версий */
+const btPos = () => S.btI ?? ((CHUNKS[S.btAt] || CHUNKS[0])[0]);
+function btOpenAt(i, exact) { const c = btPieces().findIndex(k => k.includes(i)); btOpen(Math.max(0, c), exact); }
+const btCur = () => btPieces()[bt.c];
+const btIdx = () => btCur().filter(i => !skipped(S, P[i].id));
+const dotsOf = p => (TX(p).match(/\S+/g) || []).map(() => '•').join(' ');
+const GRADE_LBL = { g: 'знаю', y: 'с трудом', r: 'не знаю' };
+const ICO_HARD = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M12 7v6"/><path d="M12 16.8v.2"/></svg>';
+const ICO_DUNNO = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.4-2.7 4"/><path d="M12 17.2v.1"/></svg>';
+const marksHtml = i => `<div class="marks">${lrnBtn('mk', i)}<button class="mk y" data-self="${i}" data-c="y" aria-pressed="false" aria-label="Трудно — пусть вернётся пораньше">${ICO_HARD}</button><button class="mk r" data-self="${i}" data-c="r" aria-pressed="false" aria-label="Не знаю — пусть вернётся завтра">${ICO_DUNNO}</button><button class="mk eye" data-eye="${i}"></button></div>`;
+function btOpen(c, exact) {  /* exact — открыт «›» у фразы: кусок с ней, даже если вся она «выучено» */
+  show('bt');
+  const K = btPieces();
+  c = c % K.length;
+  if (!exact) for (let k = 0; k < K.length && K[c].every(i => skipped(S, P[i].id)); k++) c = (c + 1) % K.length;
+  bt = { c, step: 1, hid: {}, tries: 0, res: {}, self: {}, held: {} };
+  $('bCnt').textContent = `${(G.btN || 3) === 1 ? 'фраза' : 'кусок'} ${c + 1} / ${K.length}`;
+  $('bSub').textContent = `Переведите фразу ${LG(M).to}, не глядя на оригинал`;
+  $('bLines').innerHTML = K[c].map(i => `<div class="line has-mk" data-i="${i}"><div class="slot"></div><span class="ru-line">${esc(P[i].ru)}</span>${marksHtml(i)}<div class="gloss hidden"></div></div>`).join('');
+  btRender(); window.scrollTo(0, 0);
+}
+/* верное из сверки — со словами, на которые можно нажать (карточка слова, статья) */
+function origTap(d, p) {
+  let at = 0;
+  return d.os.map((h, k) => {
+    const j = p.words.findIndex((w, q) => q >= at && w.t.replace(/[’‘ʼ`]/g, "'") === d.ob[k]);  /* английский: сверка видит ’ как ' */
+    if (j < 0) return h;
+    at = j + 1;
+    return p.words[j].l ? `<span class="w" data-k="${j}" data-l="${esc(p.words[j].l)}">${h}</span>` : h;
+  }).join(' ');
+}
+function btRender(keep) {  /* keep — что оставить в полях при «Ещё раз»; иначе в полях остаётся написанное */
+  const live = new Set(btIdx()), cur = {};
+  document.querySelectorAll('#bLines textarea').forEach(t => cur[t.dataset.i] = t.value);
+  document.querySelectorAll('#bLines .line').forEach(l => {
+    const i = +l.dataset.i, p = P[i], slot = l.querySelector('.slot'), hid = !!bt.hid[i];
+    l.querySelector('.gloss').classList.add('hidden');
+    const eye = l.querySelector('[data-eye]');
+    eye.classList.toggle('off', bt.step === 3 || (bt.step === 2 && !live.has(i)));
+    paintEye(eye, hid, 'оригинал');
+    if (bt.step === 1) slot.innerHTML = hid ? `<span class="dots">${esc(dotsOf(p))}</span>` : `<span class="el">${wordsHtml(p)}</span>`;
+    else if (!live.has(i)) slot.innerHTML = `<span class="el known">${wordsHtml(p)}</span>`;
+    else if (bt.step === 2) {
+      slot.innerHTML = `<span class="el${hid ? ' hidden' : ''}">${wordsHtml(p)}</span><textarea class="${hid ? '' : 'hidden'}" data-i="${i}" id="in-${i}" lang="${esc(M.lang || 'el')}" rows="2" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(p.ru)}"></textarea>`;
+      const v = keep ? keep[i] : cur[i]; if (v) slot.querySelector('textarea').value = v;
+    } else {
+      const r = bt.res[i];
+      slot.innerHTML = `<div class="cmp">${r.a ? `<span class="el you">${r.d.u}</span>` : ''}<span class="el">${r.a ? origTap(r.d, p) : `<span class="miss">${wordsHtml(p)}</span>`}</span><span class="grade ${r.g}">${GRADE_LBL[r.g]}</span></div>`;
+    }
+    /* оригинал: слово — карточка (долгое нажатие — статья), мимо слов — звук фразы */
+    const el = slot.querySelector('.el:not(.you)');
+    if (el) el.onclick = ev => {
+      const w = ev.target.closest('.w');
+      if (w) { const g = l.querySelector('.gloss'); g.innerHTML = glossHtml(p.words[+w.dataset.k]); g.classList.remove('hidden'); pickWord($('bLines'), w); return; }
+      toggle(l, () => { playBy(l, i, G.rate, () => l.classList.remove('playing')); l.classList.add('playing'); });
+    };
+  });
+  paintMarks();
+  const all = btCur().filter(i => bt.step === 1 || live.has(i));
+  paintEye($('bEye'), all.length > 0 && all.every(i => bt.hid[i]), 'оригинал');
+  $('bEye').disabled = bt.step === 3 || !all.length;
+  $('bNext').classList.toggle('hidden', bt.step !== 1);
   $('bCheck').classList.toggle('hidden', bt.step !== 2);
   $('bS3').classList.toggle('hidden', bt.step !== 3);
-  if (bt.step === 3) {
-    const bad = btIdx().some(i => bt.res[i].g === 'r');
-    $('bOn').classList.toggle('hidden', bad);
-    $('bOn').textContent = bt.c + 1 < CHUNKS.length ? 'Дальше' : 'Готово';
-  }
+  $('bOn').textContent = bt.c + 1 < btPieces().length ? 'Далее' : 'Готово';
   paintSpeed(); paintOwner();
 }
-$('bPlay').onclick = () => toggle($('bPlay'), () => playSeq($('bPlay'), CHUNKS[bt.c], G.rate, i => { const l = document.querySelector(`#bLines .line[data-i="${i}"]`); l && l.classList.add('playing'); }));
-$('bEye').onclick = () => { bt.hide = !bt.hide; btRender(); };
+const btFocus = i => { const t = i === undefined ? [...document.querySelectorAll('#bLines textarea:not(.hidden)')].find(x => !x.value) : $('in-' + i); if (t && !t.classList.contains('hidden')) t.focus({ preventScroll: true }); };
+/* глаз у фразы — её оригинал; глаз в ряду звука — все сразу (есть видимый — скрыть все, иначе показать все) */
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-eye]'); if (!b || !shown('bt')) return;
+  const i = +b.dataset.eye; bt.hid[i] = !bt.hid[i]; btRender();
+  if (bt.step === 2 && bt.hid[i]) btFocus(i);
+});
+$('bEye').onclick = () => {
+  const all = btCur().filter(i => bt.step === 1 || btIdx().includes(i)), on = !all.every(i => bt.hid[i]);
+  all.forEach(i => bt.hid[i] = on); btRender();
+};
+$('bPlay').onclick = () => toggle($('bPlay'), () => playSeq($('bPlay'), btCur(), G.rate, i => { const l = document.querySelector(`#bLines .line[data-i="${i}"]`); l && l.classList.add('playing'); }));
 $('bNext').onclick = () => {
-  stop(); bt.step = 2; btRender();
-  const f = document.querySelector('#bLines textarea'); if (f) f.focus({ preventScroll: true });
+  stop(); bt.step = 2; bt.hid = {}; btIdx().forEach(i => bt.hid[i] = true); btRender(); btFocus();
   if (!btIdx().length) $('bCheck').click();  /* весь кусок «выучено» — сверять нечего */
 };
 $('bCheck').onclick = () => {
   const first = bt.tries === 0;
+  stop();
   btIdx().forEach(i => {
     const t = $('in-' + i), a = t ? t.value.trim() : '';
     const d = a ? diff(a, TX(P[i]), M.lang) : null;
     bt.res[i] = { a, d, g: d ? d.g : 'r' };
-    if (first) {  /* оценка — по первой попытке: цвет, написанное, журнал */
+    if (first) {  /* оценка — по первой попытке: цвет, написанное, журнал; своя отметка в этом куске — главнее */
       if (a) S.written[P[i].id] = a;
-      mark(i, bt.res[i].g, 'bt');
+      if (bt.self[i] && selfOf(S, P[i].id)) bt.held[i] = true; else mark(i, bt.res[i].g, 'bt');
     }
   });
   bt.tries++; save();
-  bt.step = 3; btRender(); paintLrn(); window.scrollTo(0, 0);
+  bt.step = 3; btRender(); window.scrollTo(0, 0);
 };
 /* «Ещё раз»: поля фраз с ошибками пустеют, верные («знаю») остаются заполненными */
 $('bAgain').onclick = () => {
+  stop();
   const keep = {}; btIdx().forEach(i => { if (bt.res[i].g === 'g') keep[i] = bt.res[i].a; });
-  bt.step = 2; btRender(keep); window.scrollTo(0, 0);
-  const f = [...document.querySelectorAll('#bLines textarea')].find(t => !t.value); if (f) f.focus({ preventScroll: true });
+  bt.step = 2; bt.hid = {}; btIdx().forEach(i => bt.hid[i] = true); btRender(keep); window.scrollTo(0, 0); btFocus();
 };
+/* «Далее» — всегда: идти дальше, не выучив фразу, — выбор человека */
 $('bOn').onclick = () => {
-  const last = bt.c + 1 >= CHUNKS.length;
-  S.btAt = (bt.c + 1) % CHUNKS.length; save();
-  last ? goBack(M.id) : btOpen(S.btAt);
+  const K = btPieces(), last = bt.c + 1 >= K.length;
+  S.btI = K[(bt.c + 1) % K.length][0];
+  S.btAt = Math.max(0, CHUNKS.findIndex(ch => ch.includes(S.btI))); save();
+  last ? goBack(M.id) : btOpenAt(S.btI);
 };
 
 /* сверка написанного: слова сводятся с оригиналом (одинаковые — и похожие, если совпадает хотя бы половина букв),
@@ -744,10 +845,11 @@ function diff(user, orig, lang) {
   pa.forEach((x, q) => { if (ma[q] !== null) okU[x.k] = true; });
   const worst = Math.max(0, ...gw, ...okU.map(v => v ? 0 : 2));
   /* uw — своё слово: 0 верно, 1–2 с ошибкой, 2 и не сведено — лишнее (extra); miss — сколько верных слов не написано */
-  return { u: U.join(' '), o: O.join(' '), g: ['g', 'y', 'r'][worst], words: A.map((x, k) => ({ w: x.w, e: uw[k], extra: !okU[k] })), miss: gw.filter((v, k) => v === 2 && !O[k].startsWith('<span class="cx') && O[k].includes('class="miss"')).length, err: worst ? (U.join('').match(/class="(cx|bad)"/g) || []).length + (O.join('').match(/class="miss"/g) || []).length : 0 };
+  return { u: U.join(' '), o: O.join(' '), os: O, ob: B.map(x => x.w), g: ['g', 'y', 'r'][worst], words: A.map((x, k) => ({ w: x.w, e: uw[k], extra: !okU[k] })), miss: gw.filter((v, k) => v === 2 && !O[k].startsWith('<span class="cx') && O[k].includes('class="miss"')).length, err: worst ? (U.join('').match(/class="(cx|bad)"/g) || []).length + (O.join('').match(/class="miss"/g) || []).length : 0 };
 }
 /* --- FSRS (FSRS-5, веса по умолчанию): состояние фразы пересчитывается из журнала — схема базы не меняется ---
-   Оценка: сверка письма (bt, check; прежние bt-письмо, bt-голос) — не знаю → Again, с трудом → Hard, знаю → Good; «выучено» → Easy.
+   Оценка: сверка письма (bt, check; прежние bt-письмо, bt-голос) — не знаю → Again, с трудом → Hard, знаю → Good; «выучено» → Easy;
+   свои отметки (self) — «трудно» → Hard, «не знаю» → Again.
    ✓ «пройдено» в «Повторении» (и прежняя «Скороговорка») оценки не ставит: новая фраза получает срок — следующий день.
    Освоена — стабильность ≥ 21 дня. */
 const FW = [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621];
@@ -775,14 +877,15 @@ function fsrsStep(c, g, t) {
   c.last = t; c.reps++;
   c.due = addDays(t, g === 1 ? 1 : Math.max(1, Math.round(c.s)));  /* удержание 0,9: интервал = стабильность */
 }
-/* карточки текста: { фраза: { s, d, last, due, reps } } — по журналу, «unlearn» снимает последнее «выучено» */
+/* карточки текста: { фраза: { s, d, last, due, reps } } — по журналу, «unlearn» снимает последнее «выучено», «unself» — последнее «трудно»/«не знаю» */
 function cardsOf(s) {
   const ev = s.log.filter(x => x.p && x.t).slice().sort((a, b) => a.t.localeCompare(b.t));
   const drop = new Set();
-  ev.forEach((x, k) => { if (x.m === 'unlearn') { for (let j = k - 1; j >= 0; j--) if (ev[j].p === x.p && ev[j].m === 'learned' && !drop.has(j)) { drop.add(j); break; } } });
+  const UNDO = { unlearn: 'learned', unself: 'self' };  /* снятая отметка в расчёт не идёт */
+  ev.forEach((x, k) => { const u = UNDO[x.m]; if (u) { for (let j = k - 1; j >= 0; j--) if (ev[j].p === x.p && ev[j].m === u && !drop.has(j)) { drop.add(j); break; } } });
   const C = {};
   ev.forEach((x, k) => {
-    if (drop.has(k) || x.m === 'unlearn') return;
+    if (drop.has(k) || UNDO[x.m]) return;
     const t = tOf(x); if (!t) return;
     const c = C[x.p] || (C[x.p] = { s: null, d: null, last: 0, due: 0, reps: 0 });
     if (x.m === 'learned') fsrsStep(c, 4, t);
