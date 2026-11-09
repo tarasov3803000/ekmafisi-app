@@ -178,6 +178,8 @@
 .slv-list .t { font-size: calc(14px + var(--up, 0px)); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slv-list .more { text-align: center; color: var(--accent); font-weight: 600; }
 .slv-art { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; }
+.slv.android .slv-back { display: none; }  /* на Android — системный жест «назад» */
+.slv-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .slv-back { justify-self: start; border: 0; background: none; color: var(--accent); font: 600 calc(15px + var(--up, 0px)) var(--f-ui); padding: 0; cursor: pointer; }
 .slv-head { display: flex; align-items: center; gap: 10px; }
 .slv-head h1 { flex: 1; margin: 0; font: 600 calc(32px + var(--up, 0px))/1.15 var(--f-el); text-wrap: balance; }
@@ -204,18 +206,20 @@
 .slv-ph .e { font: calc(16px + var(--up, 0px)) var(--f-el); }
 .slv-forms { font: calc(16px + var(--up, 0px))/1.5 var(--f-el); color: var(--muted); }
 `;
+  const ANDROID = /android/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent);
   const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
   const brief = s => s.z.slice(0, 3).map(z => z.ru).join('; ');
 
   function mount(root, opts) {
     if (!document.getElementById('slv-css')) { const st = document.createElement('style'); st.id = 'slv-css'; st.textContent = CSS; document.head.appendChild(st); }
-    root.innerHTML = `<div class="slv">
-      <input class="slv-q" type="search" placeholder="Греческое или русское слово" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю">
+    /* поле без подсказок: нестандартное name/id, autocomplete/autocorrect выкл. — Chrome не подставляет прошлые вводы, клавиатура не правит */
+    root.innerHTML = `<div class="slv${ANDROID ? ' android' : ''}">
+      <input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="Греческое или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other">
       <p class="slv-st"></p><div class="slv-bar hidden"><i></i></div>
       <div class="slv-list"></div>
       <article class="slv-art hidden"></article></div>`;
     const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
-    let res = [], shown = 100, cur = null, want = null;
+    let res = [], shown = 100, cur = null, want = null, listY = 0;
 
     const status = () => { st.textContent = D ? `${num(D.n)} статей · ищется по-гречески, латиницей и по-русски` : ''; };
     function drawList() {
@@ -245,6 +249,7 @@
     const pick = l => opts.onPick ? opts.onPick(l) : api.show(l);
     art.addEventListener('click', e => {
       if (e.target.closest('.slv-back')) { opts.onBack ? opts.onBack() : api.show(null); return; }
+      const lk = e.target.closest('.slv-link'); if (lk) { pick(lk.dataset.l); return; }
       if (!cur) return;
       const s = D.S[D.by.get(cur)];
       const b = e.target.closest('.slv-say');
@@ -258,7 +263,7 @@
       const s = D.S[i];
       let h = `<button class="slv-back">← ${q.value.trim() ? 'к списку' : 'к поиску'}</button>
         <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1><button class="slv-say" aria-label="Произнести">${SPK}</button></div>
-        <p class="slv-meta">${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.p ? `<span>${esc(s.p)}</span>` : ''}${s.r ? `<span>№ ${num(s.r)} по частоте</span>` : ''}</p>`;
+        <p class="slv-meta">${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.p ? `<span>${esc(s.p)}</span>` : ''}${s.v ? `<span>№ ≈ ${num(s.v[0])} по частоте, вместе с <button class="slv-link" lang="el" data-l="${esc(s.v[1])}">${esc(s.v[1])}</button></span>` : s.r ? `<span>№ ${num(s.r)} по частоте</span>` : ''}</p>`;
       if (s.n) h += `<p class="slv-note">${esc(s.n)}</p>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
         `<li><span class="e" lang="el">${esc(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
@@ -274,10 +279,17 @@
       show(l) {  /* l — статья; null — список */
         want = l;
         if (!D) return;
+        const was = cur, y = window.scrollY;
         cur = l && article(l) ? l : null;
+        if (cur && !was) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
         art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
         if (!cur) drawList();
-        window.scrollTo(0, 0);
+        if (cur) window.scrollTo(0, 0);
+        else if (was) {  /* назад к списку — на прежнее место; запрос в поле остаётся */
+          const y = listY; window.scrollTo(0, y);
+          requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));  /* браузер после popstate восстанавливает свою прокрутку — поверх неё */
+        }
+        /* список → список (повторный вызов маршрута) — прокрутку не трогаем */
       },
       focus() { if (D && !cur) q.focus({ preventScroll: true }); },
       ready: null
