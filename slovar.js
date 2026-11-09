@@ -47,7 +47,8 @@
       const count = new TransformStream({ transform(ch, ctl) { got += ch.byteLength; onProgress && onProgress(got / (p.gz || 6e6)); ctl.enqueue(ch); } });
       const txt = await new Response(r.body.pipeThrough(count).pipeThrough(new DecompressionStream('gzip'))).text();
       await c.put(k, new Response(txt, { headers: { 'Content-Type': 'application/json' } }));
-      c.keys().then(ks => ks.forEach(q => (q.url === k || q.url === ckey(PTR)) || c.delete(q)));  /* прежние версии — вон */
+      const keep = new Set([k, ckey(PTR), p.tablicy && ckey(p.tablicy.replace(/\.gz$/, ''))]);
+      c.keys().then(ks => ks.forEach(q => keep.has(q.url) || c.delete(q)));  /* прежние версии — вон */
       hit = new Response(txt);
     }
     return hit.json();
@@ -73,8 +74,27 @@
   }
   function load(onProgress) {
     if (D) return Promise.resolve(D);
-    return loading || (loading = pointer().then(p => fetchData(p, onProgress)).then(d => (D = index(d)))
+    return loading || (loading = pointer().then(p => fetchData(p, onProgress).then(d => { D = index(d); D.ptr = p; return D; }))
+      .then(D => { if (navigator.onLine) setTimeout(() => tablicy().catch(() => {}), 1500); return D; })  /* таблицы — следом, в фоне: без сети они тоже нужны */
       .catch(e => { loading = null; throw e; }));
+  }
+  /* таблицы спряжения и склонения — отдельный файл (tools/tablicy_slov.py), кэш рядом со словарём */
+  let TB = null, tbLoading = null;
+  function tablicy() {
+    if (TB) return Promise.resolve(TB);
+    if (!D || !D.ptr.tablicy) return Promise.reject(new Error('нет таблиц'));
+    return tbLoading || (tbLoading = (async () => {
+      const p = D.ptr, c = await caches.open(CACHE), k = ckey(p.tablicy.replace(/\.gz$/, ''));
+      let hit = await c.match(k);
+      if (!hit) {
+        const r = await EK.remote(p.tablicy);
+        if (!r.ok) throw new Error('Таблицы не загрузились: ' + r.status);
+        const txt = await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text();
+        await c.put(k, new Response(txt, { headers: { 'Content-Type': 'application/json' } }));
+        hit = new Response(txt);
+      }
+      return (TB = await hit.json());
+    })().catch(e => { tbLoading = null; throw e; }));
   }
 
   /* --- поиск --- */
@@ -226,6 +246,22 @@
 .slv-pos[data-c=t] { background: light-dark(#efe8e1, #362d25); color: light-dark(#5e4a37, #d6c2ad); }
 .slv-pos[data-c=i] { background: light-dark(#fbe1ee, #43202f); color: light-dark(#9a2b62, #f2a3c8); }
 .slv-pos[data-c=pp] { background: light-dark(#ecf0d8, #2f3519); color: light-dark(#56651a, #c6d886); }
+.slv-tbbtn { flex: none; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; gap: .2em; padding: 0 .35em; cursor: pointer; font: 600 calc(15px + var(--up, 0px)) var(--f-ui); }
+.slv-head .slv-tbbtn { font-size: .45em; height: 2.9em; padding: 0 .8em; border-radius: .7em; }
+.slv-tbbtn svg { width: 1.3em; height: 1.3em; }
+.slv-tbbtn.on { background: var(--accent); color: var(--accent-ink); }
+.slv-tbs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.slv-tbs h2.slv-voice { grid-column: 1 / -1; margin: 8px 0 -4px; }
+.slv-tb { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+.slv-tb h3 { margin: 0 0 6px; font: 700 calc(16px + var(--up, 0px)) var(--f-el); }
+.slv-tb h3 span { font: 400 calc(13px + var(--up, 0px)) var(--f-ui); color: var(--muted); margin-left: 4px; }
+.slv-tb table { border-collapse: collapse; width: 100%; font: calc(16px + var(--up, 0px))/1.35 var(--f-el); }
+.slv-tb th { text-align: left; font: 600 calc(12px + var(--up, 0px)) var(--f-ui); color: var(--muted); padding: 5px 8px 3px 0; white-space: nowrap; vertical-align: top; }
+.slv-tb tbody th { width: 5.6em; }  /* столбец форм — на одном месте во всех блоках */
+.slv-tb thead th { font-weight: 700; }
+.slv-tb td { padding: 3px 8px 3px 0; vertical-align: top; }
+.slv-tb small { font-size: .8em; color: var(--muted); }
+.slv-tbwait { color: var(--muted); }
 .slv-var { margin: -6px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); }
 .slv-note { margin: 0; font-size: calc(15px + var(--up, 0px)); background: var(--paper); border-radius: 10px; padding: 8px 12px; }
 .slv-z { margin: 0; padding-left: 24px; display: grid; gap: 12px; }
@@ -248,6 +284,21 @@
   const ANDROID = /android/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent);
   const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
   const brief = s => s.z.slice(0, 3).map(z => z.ru).join('; ');
+  const TBI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 10h18M3 15h18M10 4v16"/></svg>';
+  const ARTI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7M9 19h4"/></svg>';
+  const tbName = s => (s.p || '').startsWith('глагол') ? 'Спряжение' : 'Склонение';
+  function tbHtml(bloki) {
+    let h = '<div class="slv-tbs">', voice = null;
+    for (const [zag, ru, cols, rows] of bloki) {
+      const glagol = cols.length === 1;
+      if (glagol && cols[0] && cols[0] !== voice) { voice = cols[0]; h += `<h2 class="slv-voice">${esc(voice)}</h2>`; }
+      const cell = c => c.map(f => f.startsWith('~') ? `<small>${esc(f.slice(1))}</small>` : esc(f)).join(', ');
+      h += `<section class="slv-tb"><h3 lang="el">${esc(zag)}<span>${esc(ru)}</span></h3><table lang="el">`
+        + (!glagol ? `<thead><tr><th></th>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>` : '')
+        + '<tbody>' + rows.map(([r, cells]) => `<tr><th>${esc(r)}</th>${cells.map(c => `<td>${cell(c)}</td>`).join('')}</tr>`).join('') + '</tbody></table></section>';
+    }
+    return h + '</div>';
+  }
   const FR = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1.5" y="9" width="3" height="5.5" rx="1"/><rect x="6.5" y="5.5" width="3" height="9" rx="1"/><rect x="11.5" y="2" width="3" height="12.5" rx="1"/></svg>';
   const POS = [['глагол', 'v'], ['сущ', 'n'], ['прил', 'a'], ['нареч', 'd'], ['местоим', 'p'], ['предлог', 'r'], ['союз', 'c'], ['частица', 'q'],
     ['числит', 'm'], ['порядк', 'm'], ['артикль', 't'], ['межд', 'i'], ['прич', 'pp']];
@@ -270,7 +321,7 @@
     if (opts.aside) root.querySelector('.slv-row').appendChild(opts.aside);  /* шестерёнка приложения — в строку поиска, справа */
     addEventListener('resize', () => cur && fitMeta(art.querySelector('.slv-meta')));  /* поворот экрана — строку под словом заново */
     const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
-    let res = [], shown = 100, cur = null, want = null, listY = 0;
+    let res = [], shown = 100, cur = null, want = null, listY = 0, mode = null, wantM = null;
 
     const status = () => { st.textContent = D ? `${num(D.n)} статей · ищется по-гречески, латиницей и по-русски` : ''; };
     function drawList() {
@@ -297,10 +348,11 @@
       if (b.dataset.more) { shown += 100; drawList(); return; }
       pick(D.S[+b.dataset.i].l);
     });
-    const pick = l => opts.onPick ? opts.onPick(l) : api.show(l);
+    const pick = (l, m) => opts.onPick ? opts.onPick(l, m) : api.show(l, m);
     art.addEventListener('click', e => {
       if (e.target.closest('.slv-back')) { opts.onBack ? opts.onBack() : api.show(null); return; }
       const lk = e.target.closest('.slv-link'); if (lk) { pick(lk.dataset.l); return; }
+      if (e.target.closest('.slv-tbbtn')) { pick(cur, mode === 'tab' ? null : 'tab'); return; }  /* рубильник «таблицы / статья» */
       if (!cur) return;
       const s = D.S[D.by.get(cur)];
       const b = e.target.closest('.slv-say');
@@ -309,18 +361,28 @@
       if (x) { const ex = s.z[+x.dataset.z].ex[+x.dataset.x]; play(sayText(ex.el), ex.a && D.zvukP ? D.zvukP + ex.a + '.mp4' : null, x); }
     });
 
-    function article(l) {
+    function article(l, m) {
       const i = D.by.get(l); if (i === undefined) return false;
       const s = D.S[i];
+      const tab = m === 'tab' && s.tb;
+      const tbBtn = s.tb ? (tab ? `<button class="slv-tbbtn on" aria-label="К статье">${ARTI}Статья</button>` : `<button class="slv-tbbtn" aria-label="${tbName(s)}">${TBI}${tbName(s)}</button>`) : '';
       let h = `<button class="slv-back">← ${q.value.trim() ? 'к списку' : 'к поиску'}</button>
-        <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1><button class="slv-say" aria-label="Произнести">${SPK}</button></div>
+        <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1>${tbBtn}<button class="slv-say" aria-label="Произнести">${SPK}</button></div>`;
+      if (tab) {  /* таблицы — отдельным экраном той же статьи */
+        mode = 'tab';
+        art.innerHTML = h + (TB ? (TB[l] ? tbHtml(TB[l]) : '<p class="slv-tbwait">Таблицы для этого слова нет.</p>') : '<p class="slv-tbwait">Загружаю таблицы…</p>');
+        if (!TB) tablicy().then(() => cur === l && mode === 'tab' && article(l, m)).catch(e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = navigator.onLine ? e.message : 'Таблицы ещё не загружались на этот телефон — откройте один раз со связью.'; });
+        return true;
+      }
+      mode = null;
+      h += `
         <p class="slv-meta">${s.p ? `<span class="slv-pos" data-c="${posC(s.p)}">${esc(s.p)}</span>` : ''}${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.r ? `<span class="fr" title="место по частоте${s.v ? ' — вместе с ' + esc(s.v) : ''}">${FR}${num(s.r)}</span>` : ''}</p>
         ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}`;
       if (s.n) h += `<p class="slv-note">${esc(s.n)}</p>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
         `<li><span class="e" lang="el">${esc(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
       if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${esc(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
-      if (s.c && s.c.length) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
+      if (s.c && s.c.length && !s.tb) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
       art.innerHTML = h;
       requestAnimationFrame(() => fitMeta(art.querySelector('.slv-meta')));
       const rec = (readJ(RECENT) || []).filter(x => x !== l); rec.unshift(l);
@@ -329,11 +391,11 @@
     }
 
     const api = {
-      show(l) {  /* l — статья; null — список */
-        want = l;
+      show(l, m) {  /* l — статья; null — список; m — 'tab': таблицы этой статьи */
+        want = l; wantM = m || null;
         if (!D) return;
         const was = cur, y = window.scrollY;
-        cur = l && article(l) ? l : null;
+        cur = l && article(l, m) ? l : null;
         if (cur && !was) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
         art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
         if (!cur) drawList();
@@ -350,7 +412,7 @@
     st.textContent = 'Загружаю словарь…';
     const bar = $('.slv-bar');
     api.ready = load(f => { bar.classList.remove('hidden'); bar.firstElementChild.style.width = Math.min(100, f * 100).toFixed(0) + '%'; st.textContent = `Загружаю словарь — один раз, дальше без сети · ${Math.min(99, Math.round(f * 100))} %`; })
-      .then(() => { bar.classList.add('hidden'); status(); if (q.value.trim()) run(); api.show(want); })
+      .then(() => { bar.classList.add('hidden'); status(); if (q.value.trim()) run(); api.show(want, wantM); })
       .catch(e => { bar.classList.add('hidden'); st.textContent = e.message || String(e); });
     return api;
   }

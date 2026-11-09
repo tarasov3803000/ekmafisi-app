@@ -239,7 +239,10 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
 }
 function parseHash(h) {
   if (['settings', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
-  if (h === 'slovar' || h.startsWith('slovar/')) return { v: 'slovar', l: h.length > 7 ? decodeURIComponent(h.slice(7)) : null };
+  if (h === 'slovar' || h.startsWith('slovar/')) {  /* #slovar/<лемма>[/tab] — статья или её таблицы */
+    const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.endsWith('/tab');
+    return { v: 'slovar', l: m ? r.slice(0, -4) : r, m: m ? 'tab' : null };
+  }
   for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
   return LIB.some(m => m.id === h) ? { v: 'home', id: h } : { v: 'shelf' };
 }
@@ -247,7 +250,7 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
   if (t.v === 'shelf' || t.v === 'settings' || t.v === 'words') { if (force || !shown(t.v)) show(t.v); }
   else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
-  else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slv().show(t.l); }
+  else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slv().show(t.l, t.m); }
   else if (t.v === 'soberi') { if (force || !shown('soberi')) soberiOpen(); }
   else if (t.v === 'sbgo') { if (force || !shown('sbgo')) sbGo(SB.step); }
   else {
@@ -955,7 +958,7 @@ $('cPlay').onclick = () => toggle($('cPlay'), () => playBy($('cPlay'), ck.q[ck.k
 /* --- «Словарь»: весь свой словарь, общий модуль с приложением «Словарь» (app/slovar.js); #slovar — поиск, #slovar/<лемма> — статья --- */
 let SLV = null;
 const slv = () => SLV || (SLV = Slovar.mount($('slvBox'), {
-  onPick: l => { push('slovar/' + encodeURIComponent(l)); SLV.show(l); },
+  onPick: (l, m) => { push('slovar/' + encodeURIComponent(l) + (m ? '/' + m : '')); SLV.show(l, m); },
   onBack: () => goBack('slovar')
 }));
 $('slvOpen').onclick = () => { push('slovar'); show('slovar'); slv().show(null); slv().focus(); slv().ready.then(() => shown('slovar') && slv().focus()); };
