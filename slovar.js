@@ -263,7 +263,7 @@
       const s = D.S[i];
       let h = `<button class="slv-back">← ${q.value.trim() ? 'к списку' : 'к поиску'}</button>
         <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1><button class="slv-say" aria-label="Произнести">${SPK}</button></div>
-        <p class="slv-meta">${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.p ? `<span>${esc(s.p)}</span>` : ''}${s.v ? `<span>№ ≈ ${num(s.v[0])} по частоте, вместе с <button class="slv-link" lang="el" data-l="${esc(s.v[1])}">${esc(s.v[1])}</button></span>` : s.r ? `<span>№ ${num(s.r)} по частоте</span>` : ''}</p>`;
+        <p class="slv-meta">${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.p ? `<span>${esc(s.p)}</span>` : ''}${s.r ? `<span>№ ${num(s.r)} по частоте${s.v ? `, вместе с <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button>` : ''}</span>` : ''}</p>`;
       if (s.n) h += `<p class="slv-note">${esc(s.n)}</p>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
         `<li><span class="e" lang="el">${esc(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
