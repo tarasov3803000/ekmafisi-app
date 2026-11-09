@@ -47,8 +47,7 @@
       const count = new TransformStream({ transform(ch, ctl) { got += ch.byteLength; onProgress && onProgress(got / (p.gz || 6e6)); ctl.enqueue(ch); } });
       const txt = await new Response(r.body.pipeThrough(count).pipeThrough(new DecompressionStream('gzip'))).text();
       await c.put(k, new Response(txt, { headers: { 'Content-Type': 'application/json' } }));
-      const keep = new Set([k, ckey(PTR), p.tablicy && ckey(p.tablicy.replace(/\.gz$/, ''))]);
-      c.keys().then(ks => ks.forEach(q => keep.has(q.url) || c.delete(q)));  /* прежние версии — вон */
+      c.keys().then(ks => ks.forEach(q => nuzhen(q.url, p, k) || c.delete(q)));  /* прежние версии — вон */
       hit = new Response(txt);
     }
     return hit.json();
@@ -75,32 +74,43 @@
   function load(onProgress) {
     if (D) return Promise.resolve(D);
     return loading || (loading = pointer().then(p => fetchData(p, onProgress).then(d => { D = index(d); D.ptr = p; return D; }))
-      .then(D => { uborka(D.ptr); if (navigator.onLine) setTimeout(() => tablicy().catch(() => {}), 1500); return D; })  /* таблицы — следом, в фоне: без сети они тоже нужны */
+      .then(D => { uborka(D.ptr); if (navigator.onLine) setTimeout(() => tbVse().catch(() => {}), 1500); return D; })  /* таблицы — следом, в фоне: без сети они тоже нужны */
       .catch(e => { loading = null; throw e; }));
   }
   /* в кэше — только нынешние файлы: прошлый словарь (≈ 30 МБ) на телефоне не копится */
   async function uborka(p) {
-    const c = await caches.open(CACHE), keep = new Set([ckey(PTR), ckey(p.file.replace(/\.gz$/, '')), p.tablicy && ckey(p.tablicy.replace(/\.gz$/, ''))]);
-    for (const q of await c.keys()) if (!keep.has(q.url)) c.delete(q);
+    const c = await caches.open(CACHE);
+    for (const q of await c.keys()) if (!nuzhen(q.url, p)) c.delete(q);
   }
-  /* таблицы спряжения и склонения — отдельный файл (tools/tablicy_slov.py), кэш рядом со словарём */
-  let TB = null, tbLoading = null;
-  function tablicy() {
-    if (TB) return Promise.resolve(TB);
-    if (!D || !D.ptr.tablicy) return Promise.reject(new Error('нет таблиц'));
-    return tbLoading || (tbLoading = (async () => {
-      const p = D.ptr, c = await caches.open(CACHE), k = ckey(p.tablicy.replace(/\.gz$/, ''));
-      let hit = await c.match(k);
-      if (!hit) {
-        const r = await EK.remote(p.tablicy);
-        if (!r.ok) throw new Error('Таблицы не загрузились: ' + r.status);
-        const txt = await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text();
-        await c.put(k, new Response(txt, { headers: { 'Content-Type': 'application/json' } }));
-        hit = new Response(txt);
-      }
-      return (TB = await hit.json());
-    })().catch(e => { tbLoading = null; throw e; }));
+  /* нынешние файлы: указатель, словарь, части таблиц этой версии */
+  const nuzhen = (url, p, k) => url === k || url === ckey(PTR) || url === ckey(p.file.replace(/\.gz$/, '')) || (!!p.tablicy && url.startsWith(ckey(p.tablicy + '-')));
+  /* таблицы спряжения и склонения — 16 частей по слову (tools/slovar_telefon.py): разбирается только часть открытого
+     слова (весь файл — 64 МБ JSON, телефону тяжело), все части — в фоне в кэш, сжатыми: без сети тоже работают */
+  const TB = new Map(), tbLoading = new Map();
+  const tbPart = l => [...l].reduce((a, ch) => a + ch.codePointAt(0), 0) % D.ptr.tablicyN;  /* то же — chast_tablic в tools/slovar_telefon.py */
+  const tbFile = i => `${D.ptr.tablicy}-${String(i).padStart(2, '0')}.json.gz`;
+  async function tbGz(i) {  /* сжатая часть: из кэша, а нет — со связью и в кэш */
+    const c = await caches.open(CACHE), k = ckey(tbFile(i));
+    let hit = await c.match(k);
+    if (!hit) {
+      const r = await EK.remote(tbFile(i));
+      if (!r.ok) throw new Error('Таблицы не загрузились: ' + r.status);
+      await c.put(k, new Response(await r.blob(), { headers: { 'Content-Type': 'application/gzip' } }));
+      hit = await c.match(k);
+    }
+    return hit;
   }
+  function tablicy(l) {  /* → блоки таблиц слова или null */
+    if (!D || !D.ptr.tablicy || !D.ptr.tablicyN) return Promise.reject(new Error('нет таблиц'));
+    const i = tbPart(l);
+    if (TB.has(i)) return Promise.resolve(TB.get(i)[l] || null);
+    if (!tbLoading.has(i)) tbLoading.set(i, tbGz(i).then(r => new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).json())
+      .then(o => { TB.set(i, o); tbLoading.delete(i); if (TB.size > 3) TB.delete(TB.keys().next().value); return o; },  /* в памяти — три последние части */
+        e => { tbLoading.delete(i); throw e; }));
+    return tbLoading.get(i).then(o => o[l] || null);
+  }
+  const tbSync = l => { const i = tbPart(l); return TB.has(i) ? (TB.get(i)[l] || null) : undefined; };
+  async function tbVse() { for (let i = 0; i < (D.ptr.tablicyN || 0); i++) await tbGz(i); }
 
   /* --- поиск --- */
   function prefix(keys, q, lim) {
@@ -267,6 +277,7 @@
 .slv-tb td { padding: 3px 8px 3px 0; vertical-align: top; }
 .slv-tb small { font-size: .8em; color: var(--muted); }
 .slv-tbwait { color: var(--muted); }
+.slv-tbnote { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: calc(14px + var(--up, 0px)); }
 .slv-var { margin: -6px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); }
 .slv-note { margin: 0; font-size: calc(15px + var(--up, 0px)); background: var(--paper); border-radius: 10px; padding: 8px 12px; }
 .slv-z { margin: 0; padding-left: 24px; display: grid; gap: 12px; }
@@ -295,6 +306,7 @@
   function tbHtml(bloki) {
     let h = '<div class="slv-tbs">', voice = null;
     for (const [zag, ru, cols, rows] of bloki) {
+      if (!rows.length) { h += `<p class="slv-tbnote" lang="ru">${esc(ru)}</p>`; continue; }  /* «составлено по образцу …», «таблица слова …» */
       const glagol = cols.length === 1;
       if (glagol && cols[0] && cols[0] !== voice) { voice = cols[0]; h += `<h2 class="slv-voice">${esc(voice)}</h2>`; }
       const cell = c => c.map(f => f.startsWith('~') ? `<small>${esc(f.slice(1))}</small>` : esc(f)).join(', ');
@@ -375,8 +387,9 @@
         <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1>${tbBtn}<button class="slv-say" aria-label="Произнести">${SPK}</button></div>`;
       if (tab) {  /* таблицы — отдельным экраном той же статьи */
         mode = 'tab';
-        art.innerHTML = h + (TB ? (TB[l] ? tbHtml(TB[l]) : '<p class="slv-tbwait">Таблицы для этого слова нет.</p>') : '<p class="slv-tbwait">Загружаю таблицы…</p>');
-        if (!TB) tablicy().then(() => cur === l && mode === 'tab' && article(l, m)).catch(e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = navigator.onLine ? e.message : 'Таблицы ещё не загружались на этот телефон — откройте один раз со связью.'; });
+        const t = D.ptr.tablicyN ? tbSync(l) : null;
+        art.innerHTML = h + (t === undefined ? '<p class="slv-tbwait">Загружаю таблицы…</p>' : t ? tbHtml(t) : '<p class="slv-tbwait">Таблицы для этого слова нет.</p>');
+        if (t === undefined) tablicy(l).then(() => cur === l && mode === 'tab' && article(l, m)).catch(e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = navigator.onLine ? e.message : 'Таблицы ещё не загружались на этот телефон — откройте один раз со связью.'; });
         return true;
       }
       mode = null;
