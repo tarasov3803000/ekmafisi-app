@@ -17,6 +17,10 @@
   const ru = s => s.toLowerCase().replace(/ё/g, 'е');
   const lat = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const isGr = s => /[Ͱ-Ͽἀ-῿]/.test(s), isRu = s => /[а-яё]/i.test(s);
+  /* запрос: знаки по краям долой (диктовка ставит точку), в том числе греческие ; и · */
+  const chist = q => q.replace(/^[\s.,;:!?«»"'()…·\u037e\u0387\u2019\u2018\u201c\u201d-]+|[\s.,;:!?«»"'()…·\u037e\u0387\u2019\u2018\u201c\u201d-]+$/g, '');
+  /* составные формы: θα πάμε, να πάω, έχω πάει — ищется смысловая часть */
+  const AUX = new Set('θα να ας δεν μην μη έχω έχεις έχει έχουμε έχετε έχουν έχουνε είχα είχες είχε είχαμε είχατε είχαν είχανε'.split(' ').map(w => w.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ς/g, 'σ')));
   const STOP = new Set('и в во на с со к ко о об от по для из за у при до под над без про как что кто то или а но не ни же ли бы кого чего кому чему кем чем ком нибудь либо т п д др'.split(' '));
   const SRC = { opensubtitles: 'субтитры', tatoeba: 'tatoeba' };
   const readJ = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
@@ -55,12 +59,15 @@
       add(grI, gr(s.l), i);
       for (const w of s.s.split(/[\s/]+/)) if (w.length > 2) add(grI, gr(w), i);  /* «ο άνθρωπος», «ο/η γιατρός» — и по второму слову */
       for (const f of s.c || []) add(grI, gr(f), i);
+      if (s.v) add(grI, gr(s.v), i);
       if (s.t) add(laI, lat(s.t), i);
       for (const z of s.z) {
         const bez = ru(z.ru).replace(/\([^)]*\)/g, ' ');  /* «ставить (вертикально)» ищется по «ставить», не по «вертикально» */
         for (const w of bez.split(/[^а-яa-z-]+/)) { const key = w.replace(/^-+|-+$/g, ''); if (key.length > 1 && !STOP.has(key)) add(ruI, key, i); }
       }
     });
+    /* все формы из таблиц склонения и спряжения (tools/slovar_telefon.py, поле F: форма без ударений → номера статей) */
+    for (const k in d.F || {}) for (const i of d.F[k]) add(grI, k, i);
     const keys = m => [...m.keys()].sort();
     return { S, n: S.length, zvuk: d.zvuk, zvukP: d.zvukP, golos: d.golos || 'athina', by: new Map(S.map((s, i) => [s.l, i])), grI, ruI, laI, grK: keys(grI), ruK: keys(ruI), laK: keys(laI) };
   }
@@ -78,10 +85,12 @@
     return out;
   }
   function search(q) {
-    q = q.trim(); if (!q) return [];
+    q = chist(q.trim()); if (!q) return [];
     const byRank = (a, b) => a - b;
     if (isGr(q)) {  /* сначала точное (заголовок, затем форма), потом начало слова — всё по частоте */
-      const k = gr(q), exact = (D.grI.get(k) || []).slice().sort((a, b) => (gr(D.S[b].l) === k) - (gr(D.S[a].l) === k) || a - b);
+      let k = gr(q);
+      if (/\s/.test(k) && !D.grI.has(k)) { const w = k.split(/\s+/).map(chist).filter(x => x && !AUX.has(x)); if (w.length) k = w[w.length - 1]; }
+      const exact = (D.grI.get(k) || []).slice().sort((a, b) => (gr(D.S[b].l) === k) - (gr(D.S[a].l) === k) || a - b);
       const pre = new Set(); for (const key of prefix(D.grK, k, 600)) if (key !== k) for (const i of D.grI.get(key)) pre.add(i);
       return [...new Set([...exact, ...[...pre].sort(byRank)])];
     }
@@ -115,7 +124,14 @@
   /* --- звук: Azure из хранилища (в кэш), иначе голос телефона --- */
   const elVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^el(-|_|$)/i.test(v.lang));
   let audio = null;
-  const sayText = t => t.replace(/\//g, ' ').normalize('NFC').replace(/\s+/g, ' ').trim();  /* «ο/η γιατρός» → «ο η γιατρός»; так же — функция golos */
+  /* что сказать: два-три артикля на выбор — один, мужской, если есть (ο/η γιατρός → ο γιατρός); так же — tools/azure_golos.py skazat и функция golos */
+  const ART = /^((?:ο|η|το|οι|τα)(?:\/(?:ο|η|το|οι|τα))+)\s/;
+  const sayText = t => {
+    t = t.normalize('NFC').replace(/\s+/g, ' ').trim();
+    const m = t.match(ART);
+    if (m) { const v = m[1].split('/'); t = ['ο', 'οι', 'η', 'το', 'τα'].find(a => v.includes(a)) + t.slice(m[1].length); }
+    return t.replace(/\//g, ' ').replace(/\s+/g, ' ').trim();
+  };
   function phoneVoice(text) {
     const v = elVoice(); if (!v) return false;
     speechSynthesis.cancel();
@@ -181,13 +197,36 @@
 .slv.android .slv-back { display: none; }  /* на Android — системный жест «назад» */
 .slv-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .slv-back { justify-self: start; border: 0; background: none; color: var(--accent); font: 600 calc(15px + var(--up, 0px)) var(--f-ui); padding: 0; cursor: pointer; }
-.slv-head { display: flex; align-items: center; gap: 10px; }
-.slv-head h1 { flex: 1; margin: 0; font: 600 calc(32px + var(--up, 0px))/1.15 var(--f-el); text-wrap: balance; }
-.slv-say { flex: none; width: calc(48px + 2 * var(--up, 0px)); height: calc(48px + 2 * var(--up, 0px)); border: 0; border-radius: 14px; background: var(--accent-soft); color: var(--accent); display: inline-grid; place-items: center; padding: 0; cursor: pointer; }
-.slv-say svg { width: 58%; height: 58%; }
+.slv-row { display: flex; gap: 8px; align-items: center; }
+.slv-row .slv-q { flex: 1; min-width: 0; }
+/* значок звука — в em от слова: чуть выше строки слова на любом кегле */
+.slv-head { display: flex; align-items: center; gap: .3em; font: 600 calc(32px + var(--up, 0px))/1.15 var(--f-el); }
+.slv-head h1 { flex: 1; margin: 0; font: inherit; text-wrap: balance; }
+.slv-say { flex: none; width: 1.3em; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-grid; place-items: center; padding: 0; cursor: pointer; font-size: inherit; }
+.slv-say svg { width: 62%; height: 62%; }
 .slv-say.on { background: var(--accent); color: var(--accent-ink); }
-.slv-meta { margin: -6px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
+/* строка под словом — всегда одна: часть речи (цветная подложка), транскрипция, частота; не влезает — кегль не растёт */
+.slv-meta { margin: -4px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
+.slv-meta.fit { font-size: 14px; }
+.slv-meta > * { flex: none; }
+.slv-meta.cut .ipa { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .slv-meta .ipa { font-family: var(--f-el); }
+.slv-meta .fr { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.slv-meta .fr svg { width: 1.05em; height: 1.05em; }
+.slv-pos { border-radius: 6px; padding: 1px 7px; font-weight: 700; background: var(--paper); color: var(--ink); }
+.slv-pos[data-c=v] { background: light-dark(#dcf1e3, #173a28); color: light-dark(#1c6a3a, #86dca8); }
+.slv-pos[data-c=n] { background: light-dark(#fbe1de, #42201d); color: light-dark(#a8322a, #f4a097); }
+.slv-pos[data-c=a] { background: light-dark(#fbefc4, #3f3413); color: light-dark(#6e5100, #f0cd5c); }
+.slv-pos[data-c=d] { background: light-dark(#dcecf7, #15334a); color: light-dark(#145a85, #7cc3ec); }
+.slv-pos[data-c=p] { background: light-dark(#ece3f8, #2f2442); color: light-dark(#5b3596, #c4a8f0); }
+.slv-pos[data-c=r] { background: light-dark(#d9f1ee, #13383a); color: light-dark(#11655c, #7dd8cc); }
+.slv-pos[data-c=c] { background: light-dark(#e5e9ef, #273140); color: light-dark(#3f4d5e, #b6c3d3); }
+.slv-pos[data-c=q] { background: light-dark(#fde6d4, #42291a); color: light-dark(#93460d, #f4b07c); }
+.slv-pos[data-c=m] { background: light-dark(#e2e5fb, #23284a); color: light-dark(#33409a, #a9b4f2); }
+.slv-pos[data-c=t] { background: light-dark(#efe8e1, #362d25); color: light-dark(#5e4a37, #d6c2ad); }
+.slv-pos[data-c=i] { background: light-dark(#fbe1ee, #43202f); color: light-dark(#9a2b62, #f2a3c8); }
+.slv-pos[data-c=pp] { background: light-dark(#ecf0d8, #2f3519); color: light-dark(#56651a, #c6d886); }
+.slv-var { margin: -6px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); }
 .slv-note { margin: 0; font-size: calc(15px + var(--up, 0px)); background: var(--paper); border-radius: 10px; padding: 8px 12px; }
 .slv-z { margin: 0; padding-left: 24px; display: grid; gap: 12px; }
 .slv-z .ru { font-size: calc(17px + var(--up, 0px)); font-weight: 600; }
@@ -195,7 +234,7 @@
 .slv-ex { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
 .slv-ex li { padding-left: 10px; border-left: 2px solid var(--line); }
 .slv-ex .e { font: calc(16px + var(--up, 0px))/1.4 var(--f-el); }
-.slv-exsay { border: 0; background: var(--accent-soft); color: var(--accent); width: calc(30px + var(--up, 0px)); height: calc(30px + var(--up, 0px)); border-radius: 8px; padding: 0; margin-left: 6px; display: inline-grid; place-items: center; vertical-align: -6px; cursor: pointer; }
+.slv-exsay { border: 0; background: var(--accent-soft); color: var(--accent); width: 1.6em; height: 1.6em; border-radius: .35em; padding: 0; margin-left: .35em; display: inline-grid; place-items: center; vertical-align: -.4em; cursor: pointer; font-size: calc(16px + var(--up, 0px)); }
 .slv-exsay svg { width: 62%; height: 62%; }
 .slv-exsay.on { background: var(--accent); color: var(--accent-ink); }
 .slv-ex .r { display: block; color: var(--muted); font-size: calc(15px + var(--up, 0px)); }
@@ -209,15 +248,27 @@
   const ANDROID = /android/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent);
   const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
   const brief = s => s.z.slice(0, 3).map(z => z.ru).join('; ');
+  const FR = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1.5" y="9" width="3" height="5.5" rx="1"/><rect x="6.5" y="5.5" width="3" height="9" rx="1"/><rect x="11.5" y="2" width="3" height="12.5" rx="1"/></svg>';
+  const POS = [['глагол', 'v'], ['сущ', 'n'], ['прил', 'a'], ['нареч', 'd'], ['местоим', 'p'], ['предлог', 'r'], ['союз', 'c'], ['частица', 'q'],
+    ['числит', 'm'], ['порядк', 'm'], ['артикль', 't'], ['межд', 'i'], ['прич', 'pp']];
+  const posC = p => (POS.find(([k]) => p.startsWith(k)) || [, ''])[1];
 
+  function fitMeta(m) {  /* одна строка: не влезает с крупным кеглем — обычный кегль; всё ещё нет — транскрипция с многоточием */
+    if (!m) return;
+    m.classList.remove('fit', 'cut');
+    if (m.scrollWidth > m.clientWidth) m.classList.add('fit');
+    if (m.scrollWidth > m.clientWidth) m.classList.add('cut');
+  }
   function mount(root, opts) {
     if (!document.getElementById('slv-css')) { const st = document.createElement('style'); st.id = 'slv-css'; st.textContent = CSS; document.head.appendChild(st); }
     /* поле без подсказок: нестандартное name/id, autocomplete/autocorrect выкл. — Chrome не подставляет прошлые вводы, клавиатура не правит */
     root.innerHTML = `<div class="slv${ANDROID ? ' android' : ''}">
-      <input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="Греческое или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other">
+      <div class="slv-row"><input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="Греческое или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other"></div>
       <p class="slv-st"></p><div class="slv-bar hidden"><i></i></div>
       <div class="slv-list"></div>
       <article class="slv-art hidden"></article></div>`;
+    if (opts.aside) root.querySelector('.slv-row').appendChild(opts.aside);  /* шестерёнка приложения — в строку поиска, справа */
+    addEventListener('resize', () => cur && fitMeta(art.querySelector('.slv-meta')));  /* поворот экрана — строку под словом заново */
     const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
     let res = [], shown = 100, cur = null, want = null, listY = 0;
 
@@ -263,13 +314,15 @@
       const s = D.S[i];
       let h = `<button class="slv-back">← ${q.value.trim() ? 'к списку' : 'к поиску'}</button>
         <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1><button class="slv-say" aria-label="Произнести">${SPK}</button></div>
-        <p class="slv-meta">${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.p ? `<span>${esc(s.p)}</span>` : ''}${s.r ? `<span>№ ${num(s.r)} по частоте${s.v ? `, вместе с <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button>` : ''}</span>` : ''}</p>`;
+        <p class="slv-meta">${s.p ? `<span class="slv-pos" data-c="${posC(s.p)}">${esc(s.p)}</span>` : ''}${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.r ? `<span class="fr" title="место по частоте${s.v ? ' — вместе с ' + esc(s.v) : ''}">${FR}${num(s.r)}</span>` : ''}</p>
+        ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}`;
       if (s.n) h += `<p class="slv-note">${esc(s.n)}</p>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
         `<li><span class="e" lang="el">${esc(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
       if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${esc(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
       if (s.c && s.c.length) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
       art.innerHTML = h;
+      requestAnimationFrame(() => fitMeta(art.querySelector('.slv-meta')));
       const rec = (readJ(RECENT) || []).filter(x => x !== l); rec.unshift(l);
       try { localStorage.setItem(RECENT, JSON.stringify(rec.slice(0, 30))); } catch (e) {}
       return true;
