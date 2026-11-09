@@ -117,6 +117,13 @@
     return data;
   };
   EK.chainState = (id, state) => DEV ? Promise.resolve() : sb.from('soberi_chains').update({ state }).eq('id', id).then(({ error }) => { if (error) throw error; });
+  /* озвучка по запросу (функция golos): { url } — подписанная ссылка на mp3; без сети, в ?dev и при отказе — ошибка */
+  EK.golos = async (text) => {
+    if (DEV || !navigator.onLine) throw new Error('нет связи');
+    const { data, error } = await sb.functions.invoke('golos', { body: { text } });
+    if (error) throw error;
+    return data;
+  };
   EK.fn = async (body) => {
     if (DEV) throw new Error('dev');
     const { data, error } = await sb.functions.invoke('soberi', { body });

@@ -4,7 +4,9 @@
      el/slovar-vse-<отпечаток>.json.gz — один раз, распаковка DecompressionStream, кладётся распакованным в свой кэш.
    Дальше — без сети. Новый отпечаток — новый файл, старый из кэша вон.
    Поиск: греческий без ударений и по частым формам; латиница (транслитерация); русский — по словам значений вне скобок.
-   Звук слова: голос Azure (el/zvuk-slov/<голос>/<a>.mp4, в кэш при первом нажатии); нет файла или сети — голос телефона el-GR.
+   Звук слова и примера: голос Azure — озвученный заранее (el/zvuk-slov/<голос>/<a>.mp4, el/zvuk-prim/<голос>/<a>.mp4),
+   иначе по запросу через функцию golos (el/zvuk-zapros/<голос>/<sha16>.mp3); всё — в кэш при первом нажатии.
+   Нет сети, предел месяца или отказ — голос телефона el-GR.
    Хост даёт: EK.remote(путь) → fetch-ответ из хранилища; переходы — onPick(lemma) и onBack(); показ — api.show(lemma | null). */
 (() => {
   const CACHE = 'ekmafisi-slovar-v1', ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = 'el/slovar-vse.json', RECENT = 'ekmafisi.slovar.nedavno';
@@ -60,7 +62,7 @@
       }
     });
     const keys = m => [...m.keys()].sort();
-    return { S, n: S.length, zvuk: d.zvuk, by: new Map(S.map((s, i) => [s.l, i])), grI, ruI, laI, grK: keys(grI), ruK: keys(ruI), laK: keys(laI) };
+    return { S, n: S.length, zvuk: d.zvuk, zvukP: d.zvukP, golos: d.golos || 'athina', by: new Map(S.map((s, i) => [s.l, i])), grI, ruI, laI, grK: keys(grI), ruK: keys(ruI), laK: keys(laI) };
   }
   function load(onProgress) {
     if (D) return Promise.resolve(D);
@@ -113,38 +115,48 @@
   /* --- звук: Azure из хранилища (в кэш), иначе голос телефона --- */
   const elVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^el(-|_|$)/i.test(v.lang));
   let audio = null;
-  const sayText = s => s.s.replace(/\//g, ' ');
-  function phoneVoice(s) {
+  const sayText = t => t.replace(/\//g, ' ').normalize('NFC').replace(/\s+/g, ' ').trim();  /* «ο/η γιατρός» → «ο η γιατρός»; так же — функция golos */
+  function phoneVoice(text) {
     const v = elVoice(); if (!v) return false;
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(sayText(s)); u.voice = v; u.lang = v.lang; u.rate = 0.9;
+    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang; u.rate = 0.9;
     speechSynthesis.speak(u); return true;
   }
-  async function azureBlob(s) {
-    if (!s.a || !D.zvuk) return null;
-    const path = D.zvuk + s.a + '.mp4', c = await caches.open(ZCACHE), k = ckey(path);
+  async function zaprosKey(text) {  /* тот же отпечаток считает функция golos (supabase/functions/golos) */
+    const b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(D.golos + '|' + text)));
+    return [...b].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
+  }
+  async function cached(k, get) {  /* из кэша звука; нет — get() из сети и в кэш */
+    const c = await caches.open(ZCACHE);
     let r = await c.match(k);
     if (!r) {
       if (!navigator.onLine) return null;
-      try { r = await EK.remote(path); } catch (e) { return null; }
-      if (!r.ok) return null;
+      try { r = await get(); } catch (e) { console.warn('slovar: звук', e); return null; }
+      if (!r || !r.ok) return null;
       await c.put(k, r.clone());
     }
     return r.blob();
   }
-  async function play(s, btn) {
+  async function azureBlob(text, path) {
+    if (path) { const b = await cached(ckey(path), () => EK.remote(path)); if (b) return b; }
+    if (!window.EK || !EK.golos || !window.crypto || !crypto.subtle) return null;
+    const k = ckey(`el/zvuk-zapros/${D.golos}/${await zaprosKey(text)}.mp3`);
+    return cached(k, async () => fetch((await EK.golos(text)).url));
+  }
+  async function play(text, path, btn) {  /* text — что сказать; path — заранее озвученный файл в хранилище или null */
     if (audio) { audio.pause(); audio = null; }
+    if (window.speechSynthesis) speechSynthesis.cancel();
     btn && btn.classList.add('on');
     const done = () => btn && btn.classList.remove('on');
     try {
-      const b = await azureBlob(s);
+      const b = await azureBlob(text, path);
       if (b) {
         audio = new Audio(URL.createObjectURL(b));
         audio.onended = audio.onerror = done;
         await audio.play(); return;
       }
     } catch (e) { console.warn('slovar: звук', e); }
-    if (!phoneVoice(s)) { done(); btn && (btn.title = 'Нет голоса Azure у слова и греческого голоса на телефоне'); return; }
+    if (!phoneVoice(text)) { done(); btn && (btn.title = 'Нет голоса Azure и греческого голоса на телефоне'); return; }
     setTimeout(done, 900);
   }
 
@@ -181,6 +193,9 @@
 .slv-ex { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
 .slv-ex li { padding-left: 10px; border-left: 2px solid var(--line); }
 .slv-ex .e { font: calc(16px + var(--up, 0px))/1.4 var(--f-el); }
+.slv-exsay { border: 0; background: var(--accent-soft); color: var(--accent); width: calc(30px + var(--up, 0px)); height: calc(30px + var(--up, 0px)); border-radius: 8px; padding: 0; margin-left: 6px; display: inline-grid; place-items: center; vertical-align: -6px; cursor: pointer; }
+.slv-exsay svg { width: 62%; height: 62%; }
+.slv-exsay.on { background: var(--accent); color: var(--accent-ink); }
 .slv-ex .r { display: block; color: var(--muted); font-size: calc(15px + var(--up, 0px)); }
 .slv-src { font-size: calc(11px + var(--up, 0px)); font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 6px; white-space: nowrap; vertical-align: 1px; }
 .slv-art h2 { margin: 6px 0 0; font-size: calc(13px + var(--up, 0px)); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
@@ -230,7 +245,12 @@
     const pick = l => opts.onPick ? opts.onPick(l) : api.show(l);
     art.addEventListener('click', e => {
       if (e.target.closest('.slv-back')) { opts.onBack ? opts.onBack() : api.show(null); return; }
-      const b = e.target.closest('.slv-say'); if (b && cur) play(D.S[D.by.get(cur)], b);
+      if (!cur) return;
+      const s = D.S[D.by.get(cur)];
+      const b = e.target.closest('.slv-say');
+      if (b) { play(sayText(s.s), s.a && D.zvuk ? D.zvuk + s.a + '.mp4' : null, b); return; }
+      const x = e.target.closest('.slv-exsay');
+      if (x) { const ex = s.z[+x.dataset.z].ex[+x.dataset.x]; play(sayText(ex.el), ex.a && D.zvukP ? D.zvukP + ex.a + '.mp4' : null, x); }
     });
 
     function article(l) {
@@ -240,8 +260,8 @@
         <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1><button class="slv-say" aria-label="Произнести">${SPK}</button></div>
         <p class="slv-meta">${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.p ? `<span>${esc(s.p)}</span>` : ''}${s.r ? `<span>№ ${num(s.r)} по частоте</span>` : ''}</p>`;
       if (s.n) h += `<p class="slv-note">${esc(s.n)}</p>`;
-      h += '<ol class="slv-z">' + s.z.map(z => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map(x =>
-        `<li><span class="e" lang="el">${esc(x.el)}</span>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
+      h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
+        `<li><span class="e" lang="el">${esc(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
       if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${esc(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
       if (s.c && s.c.length) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
       art.innerHTML = h;
