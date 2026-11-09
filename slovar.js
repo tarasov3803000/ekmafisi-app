@@ -75,8 +75,13 @@
   function load(onProgress) {
     if (D) return Promise.resolve(D);
     return loading || (loading = pointer().then(p => fetchData(p, onProgress).then(d => { D = index(d); D.ptr = p; return D; }))
-      .then(D => { if (navigator.onLine) setTimeout(() => tablicy().catch(() => {}), 1500); return D; })  /* таблицы — следом, в фоне: без сети они тоже нужны */
+      .then(D => { uborka(D.ptr); if (navigator.onLine) setTimeout(() => tablicy().catch(() => {}), 1500); return D; })  /* таблицы — следом, в фоне: без сети они тоже нужны */
       .catch(e => { loading = null; throw e; }));
+  }
+  /* в кэше — только нынешние файлы: прошлый словарь (≈ 30 МБ) на телефоне не копится */
+  async function uborka(p) {
+    const c = await caches.open(CACHE), keep = new Set([ckey(PTR), ckey(p.file.replace(/\.gz$/, '')), p.tablicy && ckey(p.tablicy.replace(/\.gz$/, ''))]);
+    for (const q of await c.keys()) if (!keep.has(q.url)) c.delete(q);
   }
   /* таблицы спряжения и склонения — отдельный файл (tools/tablicy_slov.py), кэш рядом со словарём */
   let TB = null, tbLoading = null;
