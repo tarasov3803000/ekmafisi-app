@@ -18,42 +18,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
 <script>/* крупный шрифт +1…+5 px — до первой отрисовки; прежний переключатель «вкл» (ekmafisi-big = 1) — это +3 */
 try { const u = localStorage.getItem('ekmafisi-up') ?? (localStorage.getItem('ekmafisi-big') === '1' ? '3' : '0'); document.documentElement.style.setProperty('--up', (+u || 0) + 'px'); } catch (e) {}</script>
+<link rel="stylesheet" href="tokeny.css">
 <style>
 /* Экмафиси (PWA, выросла из пробной страницы): один столбец под телефон; полка текстов → текст → режим. Греческий — книжным шрифтом крупно, остальное тихо. */
-:root {
-  --paper: #f4f6f8;
-  --card: #ffffff;
-  --ink: #16202b;
-  --muted: #5d6b7a;
-  --line: #d9e0e7;
-  --accent: #1f4f8f;
-  --accent-ink: #ffffff;
-  --accent-soft: #e6eef8;
-  --g: #2e8b57; --y: #d9a40f; --r: #c8453b;
-  --g-soft: #e3f3ea; --y-soft: #fbf1d3; --r-soft: #f9e3e1;
-  --sky: #7db4ea;  /* светло-синий: вжатая скорость */
-  --aegean: #1a6d9c;  /* написанное человеком на сверке — эгейский синий */
-  --f-el: "Literata", "Noto Serif", Georgia, serif;
-  --f-ui: "Manrope", "Noto Sans", system-ui, sans-serif;
-  --up: 0px;  /* «Шрифт» в настройках: +1…+5 px ко всем текстам */
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0f151c; --card: #18212b; --ink: #e6edf3; --muted: #93a3b3; --line: #2a3644;
-    --accent: #7fb0f0; --accent-ink: #0c1420; --accent-soft: #1b2a3d;
-    --g: #4cc283; --y: #e8bb3a; --r: #ef7468;
-    --g-soft: #173327; --y-soft: #3a3016; --r-soft: #3d1d1b; --aegean: #5fb4e0; --sky: #5d9ad8;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --paper: #0f151c; --card: #18212b; --ink: #e6edf3; --muted: #93a3b3; --line: #2a3644;
-  --accent: #7fb0f0; --accent-ink: #0c1420; --accent-soft: #1b2a3d;
-  --g: #4cc283; --y: #e8bb3a; --r: #ef7468;
-  --g-soft: #173327; --y-soft: #3a3016; --r-soft: #3d1d1b; --aegean: #5fb4e0; --sky: #5d9ad8;
-  color-scheme: dark;
-}
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body { background: var(--paper); color: var(--ink); font: calc(16px + var(--up))/1.5 var(--f-ui); -webkit-text-size-adjust: 100%; }
@@ -122,6 +89,9 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .wleg { display: flex; gap: 14px; flex-wrap: wrap; font-size: calc(13px + var(--up)); color: var(--muted); }
 .wleg i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--line); margin-right: 5px; vertical-align: -1px; }
 .wleg i.ok { background: var(--g-soft); border-color: var(--g); } .wleg i.seen { border-color: var(--accent); }
+
+/* «Словарь» на полке — как поле поиска: нажал — экран словаря с курсором в поле (app/slovar.js) */
+.slv-open { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--muted); padding: 12px 14px; min-height: 48px; }
 
 /* текст */
 .meta { display: grid; gap: 6px; }
@@ -295,6 +265,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <button class="btn" id="chkOpen"></button>
     <button class="btn" id="wordsOpen"></button>
   </div>
+  <button class="slv-open hidden" id="slvOpen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Словарь</span></button>
   <button class="text soberi-card hidden" id="sbCard"></button>
   <section class="shelf" id="shelfList">
     <h2>Тексты</h2>
@@ -432,6 +403,11 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <div class="wgrid" id="wGrid"></div>
 </main>
 
+<main id="slovar" class="hidden">
+  <div class="bar"><span class="ttl">Словарь</span></div>
+  <div id="slvBox"></div>
+</main>
+
 <main id="soberi" class="hidden">
   <div class="bar"><span class="ttl">Собери</span></div>
   <p class="sub">Соберите фразу из знакомых слов — окончания, артикль и порядок слов строите сами</p>
@@ -479,6 +455,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 
 <script src="config.js"></script>
 <script src="vendor/supabase.js"></script>
+<script src="slovar.js"></script>
 <script src="sync.js"></script>
 <button id="upd" class="upd hidden">Новая версия — обновить</button>
 <script>

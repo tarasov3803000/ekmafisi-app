@@ -1,0 +1,35 @@
+/* токены вида Экмафиси — общие с приложением «Словарь» (slovar-app/): цвета, шрифты, тёмная тема, крупный шрифт (--up) */
+:root {
+  --paper: #f4f6f8;
+  --card: #ffffff;
+  --ink: #16202b;
+  --muted: #5d6b7a;
+  --line: #d9e0e7;
+  --accent: #1f4f8f;
+  --accent-ink: #ffffff;
+  --accent-soft: #e6eef8;
+  --g: #2e8b57; --y: #d9a40f; --r: #c8453b;
+  --g-soft: #e3f3ea; --y-soft: #fbf1d3; --r-soft: #f9e3e1;
+  --sky: #7db4ea;  /* светло-синий: вжатая скорость */
+  --aegean: #1a6d9c;  /* написанное человеком на сверке — эгейский синий */
+  --f-el: "Literata", "Noto Serif", Georgia, serif;
+  --f-ui: "Manrope", "Noto Sans", system-ui, sans-serif;
+  --up: 0px;  /* «Шрифт» в настройках: +1…+5 px ко всем текстам */
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f151c; --card: #18212b; --ink: #e6edf3; --muted: #93a3b3; --line: #2a3644;
+    --accent: #7fb0f0; --accent-ink: #0c1420; --accent-soft: #1b2a3d;
+    --g: #4cc283; --y: #e8bb3a; --r: #ef7468;
+    --g-soft: #173327; --y-soft: #3a3016; --r-soft: #3d1d1b; --aegean: #5fb4e0; --sky: #5d9ad8;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f151c; --card: #18212b; --ink: #e6edf3; --muted: #93a3b3; --line: #2a3644;
+  --accent: #7fb0f0; --accent-ink: #0c1420; --accent-soft: #1b2a3d;
+  --g: #4cc283; --y: #e8bb3a; --r: #ef7468;
+  --g-soft: #173327; --y-soft: #3a3016; --r-soft: #3d1d1b; --aegean: #5fb4e0; --sky: #5d9ad8;
+  color-scheme: dark;
+}

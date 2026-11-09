@@ -1,9 +1,12 @@
 /* Экмафиси — вход, содержимое и синхронизация.
    Порядок: вход (Google через Supabase) → допуск по списку адресов → список текстов → загрузка app.js.
    Всё пишется сначала на устройстве (localStorage), отправляется при изменении, подтягивается при открытии и возвращении.
-   Спор двух устройств по фразе — побеждает позднее изменение; журнал сливается по id. */
+   Спор двух устройств по фразе — побеждает позднее изменение; журнал сливается по id.
+   Тот же файл — вход и хранилище отдельного приложения «Словарь» (slovar-app/, EKM_CONFIG.app = 'slovar'):
+   там нет списка текстов и синхронизации, вместо app.js грузится EKM_CONFIG.main. */
 (() => {
   const C = window.EKM_CONFIG;
+  const ONLY_LEX = C.app === 'slovar';
   const $ = id => document.getElementById(id);
   const DEV = ['localhost', '127.0.0.1'].includes(location.hostname) && (new URLSearchParams(location.search).has('dev') || sessionStorage.getItem('ekmafisi.dev') === '1');
   if (DEV) sessionStorage.setItem('ekmafisi.dev', '1');
@@ -25,11 +28,12 @@
   const CC = 'ekmafisi-content-v1';
   const ckey = path => new URL('c/' + path, location.origin + location.pathname).href;
   async function fetchRemote(path) {
-    if (DEV) return fetch('../build/content/' + path, { cache: 'no-store' });
+    if (DEV) return fetch((C.devContent || '../build/content/') + path, { cache: 'no-store' });
     const { data, error } = await sb.storage.from(C.bucket).createSignedUrl(path, 600);
     if (error) throw error;
     return fetch(data.signedUrl);
   }
+  EK.remote = fetchRemote;  /* мимо кэша: словарь (slovar.js) держит свой кэш */
   /* fresh — сначала из сети (список текстов), иначе — из кэша (звук и словарь: имя файла меняется вместе с содержимым) */
   EK.content = async (path, fresh) => {
     const c = await caches.open(CC), k = ckey(path), hit = await c.match(k);
@@ -65,7 +69,7 @@
   /* --- синхронизация: отправить очередь, затем подтянуть изменённое с прошлого раза --- */
   let busy = false, again = false;
   async function sync() {
-    if (DEV || !EK.uid) return;
+    if (DEV || !EK.uid || ONLY_LEX) return;
     if (!navigator.onLine) { setStatus('offline'); return; }
     if (busy) { again = true; return; }
     busy = true; clearTimeout(timer);
@@ -134,7 +138,7 @@
   /* --- запуск --- */
   function runApp() {
     screen('none');
-    const s = document.createElement('script'); s.src = 'app.js';
+    const s = document.createElement('script'); s.src = C.main || 'app.js';
     document.body.appendChild(s);
   }
   function gate(msg, withOut) {
@@ -151,6 +155,7 @@
 
   async function start(u) {
     EK.uid = u.id; EK.email = u.email;
+    if (ONLY_LEX) return runApp();
     try { EK.lib = await loadLibrary(); }
     catch (e) {
       console.warn('library', e);

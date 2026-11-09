@@ -217,7 +217,7 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
-  ['shelf', 'settings', 'home', 'skor', 'bt', 'check', 'words', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  ['shelf', 'settings', 'home', 'skor', 'bt', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0);
   if (id === 'shelf') { if (window.EK_UPDATE) return location.reload(); renderShelf(); }
   if (id === 'home') renderHome();
@@ -239,6 +239,7 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
 }
 function parseHash(h) {
   if (['settings', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
+  if (h === 'slovar' || h.startsWith('slovar/')) return { v: 'slovar', l: h.length > 7 ? decodeURIComponent(h.slice(7)) : null };
   for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
   return LIB.some(m => m.id === h) ? { v: 'home', id: h } : { v: 'shelf' };
 }
@@ -246,6 +247,7 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
   if (t.v === 'shelf' || t.v === 'settings' || t.v === 'words') { if (force || !shown(t.v)) show(t.v); }
   else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
+  else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slv().show(t.l); }
   else if (t.v === 'soberi') { if (force || !shown('soberi')) soberiOpen(); }
   else if (t.v === 'sbgo') { if (force || !shown('sbgo')) sbGo(SB.step); }
   else {
@@ -284,8 +286,9 @@ function renderShelf() {
     $('chkOpen').disabled = !n;
     $('wordsOpen').innerHTML = `<span>Слова · ${w.ok}</span><small>освоено</small>`;
   }
-  /* «Собери» — только у греческого: карточка над текстами с текущей ступенью */
+  /* «Собери» и «Словарь» — только у греческого: карточка над текстами с текущей ступенью */
   const sbOn = G.lang === 'el';
+  $('slvOpen').classList.toggle('hidden', !sbOn);
   $('sbCard').classList.toggle('hidden', !sbOn);
   if (sbOn) $('sbCard').innerHTML = `<span class="t">Собери · ${esc(SB.step)}</span><span class="meta2">${esc(ladderOf(SB.step).t)}</span>`;
   const sbLast = sbOn && G.mode === 'soberi';
@@ -948,6 +951,14 @@ $('cCheck').onclick = () => {
 $('cAgain').onclick = () => { stop(); ck.keep = ck.res.g === 'g' ? ck.res.a : ''; ck.res = null; checkRender(); $('cIn').focus({ preventScroll: true }); };
 $('cOn').onclick = () => { stop(); ck.k++; ck.tries = 0; ck.res = null; ck.keep = null; checkRender(); window.scrollTo(0, 0); };
 $('cPlay').onclick = () => toggle($('cPlay'), () => playBy($('cPlay'), ck.q[ck.k].i, G.rate));
+
+/* --- «Словарь»: весь свой словарь, общий модуль с приложением «Словарь» (app/slovar.js); #slovar — поиск, #slovar/<лемма> — статья --- */
+let SLV = null;
+const slv = () => SLV || (SLV = Slovar.mount($('slvBox'), {
+  onPick: l => { push('slovar/' + encodeURIComponent(l)); SLV.show(l); },
+  onBack: () => goBack('slovar')
+}));
+$('slvOpen').onclick = () => { push('slovar'); show('slovar'); slv().show(null); slv().focus(); slv().ready.then(() => shown('slovar') && slv().focus()); };
 
 /* --- «Слова»: сверху — сколько освоено; ниже первая тысяча частотных лемм языка (material/<lang>/chastoty) --- */
 let FREQ = {};
