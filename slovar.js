@@ -324,6 +324,9 @@
 .slv-tip { position: fixed; z-index: 30; max-width: 70vw; background: var(--ink); color: var(--paper); font: 600 calc(14px + var(--up, 0px)) var(--f-ui); padding: 6px 10px; border-radius: 8px; pointer-events: none; box-shadow: 0 4px 16px rgb(0 0 0 / .25); }
 /* греческое в статье и списке — без выделения: касание не зовёт подсказки Google (Touch to Search), как .w в Экмафиси */
 .slv-art [lang="el"], .slv-list .w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+/* греческое слово в примере и выражении — касание открывает его статью (решение 17.11.2026); без подчёркивания, нажатие — подложкой */
+.slv-w { cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
+.slv-w:active, .slv-w.on { background: var(--accent-soft); }
 .slv-head button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .slv-tbbtn svg { width: 1.3em; height: 1.3em; }
 .slv-tbbtn.on { background: var(--accent); color: var(--accent-ink); }
@@ -400,6 +403,17 @@
     while (h1.scrollWidth > h1.clientWidth && fs > min) { fs = Math.max(min, fs - 1); h1.style.fontSize = fs + 'px'; }
     if (h1.scrollWidth > h1.clientWidth) h1.classList.add('wrap');
   }
+  /* греческие слова — каждое в <span class="slv-w">: касание открывает статью (текст уже экранирован, греческие буквы esc не трогает) */
+  const GRW = /[\u0370-\u03ff\u1f00-\u1fff]+/g;
+  const slova = t => esc(t).replace(GRW, w => `<span class="slv-w">${w}</span>`);
+  /* слово → лемма его статьи: точное совпадение по заголовку и всем формам, как в search(). Несколько — заголовок буква
+     в букву с ударением («Ο» → ο, «θα» → θα), иначе самая частая (номера идут по частоте): «μου» → εγώ, не редкое μού */
+  function slovoLemma(w) {
+    const c = D && exact(D.g, gr(w)); if (!c || !c.length) return null;
+    const lw = w.normalize('NFC').toLowerCase();
+    for (const i of c) { const l = row(i).l; if (l.normalize('NFC').toLowerCase() === lw) return l; }
+    return row(Math.min(...c)).l;
+  }
   const rowHtml = r => `<button data-l="${esc(r.l)}"><span class="w" lang="el">${esc(r.s)}</span><span class="t">${esc(r.b)}</span></button>`;
   const rowOf = i => { const r = row(i); return { l: r.l, s: r.s, b: brief(r.z) }; };
   function mount(root, opts) {
@@ -413,6 +427,7 @@
     root.style.minWidth = '0';  /* и в сетке страницы-хозяина */
     if (opts.aside) root.querySelector('.slv-row').appendChild(opts.aside);  /* шестерёнка приложения — в строку поиска, справа */
     const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
+    const artY = new Map();  /* статья → прокрутка, когда ушли из неё в другую: «назад» — на то же место */
     let res = [], shown = 100, cur = null, curS = null, want = null, listY = 0, mode = null, wantM = null, showTok = 0;
     /* шрифт сменили, экран повернули, шрифт догрузился — заголовок и строку под ним заново */
     const refit = () => { if (cur) { fitHead(art.querySelector('.slv-head'), art); fitMeta(art.querySelector('.slv-meta')); } };
@@ -471,6 +486,12 @@
       if (lpDone && e.target.closest('[data-tip]')) { lpDone = false; return; }
       if (e.target.closest('.slv-back')) { opts.onBack ? opts.onBack() : api.show(null); return; }
       const lk = e.target.closest('.slv-link'); if (lk) { pick(lk.dataset.l); return; }
+      const sw = e.target.closest('.slv-w');
+      if (sw) {  /* слово примера → его статья; не нашлось или это та же статья — ничего */
+        const l = slovoLemma(sw.textContent);
+        if (l && l !== cur) { sw.classList.add('on'); setTimeout(() => pick(l), 90); }  /* подложка успевает мелькнуть */
+        return;
+      }
       if (e.target.closest('.slv-tbbtn')) { pick(cur, mode === 'tab' ? null : 'tab'); return; }  /* рубильник «таблицы / статья» */
       if (!cur || !curS) return;
       const s = curS;
@@ -501,8 +522,8 @@
         ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}`;
       if (s.n) h += `<p class="slv-note">${esc(s.n)}</p>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
-        `<li><span class="e" lang="el">${esc(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
-      if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${esc(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
+        `<li><span class="e" lang="el">${slova(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
+      if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${slova(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
       if (s.c && s.c.length && !s.tb) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
       art.innerHTML = h;
       fitHead(art.querySelector('.slv-head'), art);  /* до отрисовки: страница ни на миг не шире экрана */
@@ -522,9 +543,15 @@
           if (s) article(l, m, s);
           cur = s ? l : null; if (!s) curS = null;
           if (cur && !was) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
+          if (cur && was && was !== cur) artY.set(was, y);  /* из статьи в статью (слово примера) */
           art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
           if (!cur) drawList();
-          if (cur) { refit(); window.scrollTo(0, 0); }
+          if (cur) {
+            refit();
+            const ay = was !== cur && artY.has(cur) ? artY.get(cur) : 0; artY.delete(cur);
+            window.scrollTo(0, ay);
+            if (ay) requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, ay)));  /* поверх прокрутки браузера после popstate */
+          }
           else if (was) {  /* назад к списку — на прежнее место; запрос в поле остаётся */
             const y = listY; window.scrollTo(0, y);
             requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));  /* браузер после popstate восстанавливает свою прокрутку — поверх неё */
