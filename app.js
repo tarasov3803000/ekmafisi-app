@@ -304,6 +304,8 @@ document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () =
 /* --- настройки: всё, что не учёба — язык, тема, учётная запись, итог --- */
 $('setOpen').onclick = () => { push('settings'); show('settings'); };
 function renderSettings() {
+  /* «Фраза на экране блокировки» — только в Android-приложении Экмафиси: сама функция и её настройки — там (android/) */
+  try { $('setFraza').classList.toggle('hidden', localStorage.getItem('ekmafisi.android') !== '1'); } catch (e) {}
   document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
   document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
   document.querySelectorAll('#setBtN button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.n === (G.btN || 3))));
