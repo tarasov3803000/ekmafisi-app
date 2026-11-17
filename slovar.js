@@ -1,9 +1,13 @@
 /* Словарь — общий модуль экрана «Словарь» в Экмафиси и отдельного приложения «Словарь» (slovar-app/).
    Данные: весь свой словарь из закрытого хранилища, формат 2 (tools/slovar_telefon.py, 17.11.2026):
      el/slovar2.json — версия { index, stati, gzI, gzS, tablicy… }: из кэша сразу, со связью — в фоне после открытия;
-       новая версия скачивается в фоне и вступает при следующем открытии;
+       проверяется ещё при каждом возврате в приложение и раз в три часа; новое скачивается в фоне, тихо, и вступает
+       со следующего открытия слова — без перезапуска и без сообщений (решение 18.11.2026, tools/vykladka.py);
      el/slovar2-i-<отп>.bin.gz — указатель поиска, готовый (ключи по порядку байтов, номера — Uint32), и строки списка;
-     el/slovar2-s-<отп>.txt.gz — статьи, по одной в строке.
+     el/slovar2-s-<отп>.txt.gz — статьи, по одной в строке. Это основа: качается целиком, редко;
+     el/slovar2-p-<отп>.bin.gz — поправка: статьи, изменённые, новые и удалённые с основы, тем же форматом в одном файле
+       (маленькая, при каждой выкладке). Номера статей поправки — после основы (D.n + j); статьи основы, которые она
+       заменяет или удаляет (X), поиск пропускает; место «по частоте» — между соседями основы (O).
    Оба — один раз, распаковка DecompressionStream, распакованными в свой кэш. Открытие — только чтение байтов из кэша:
    ни JSON.parse всего словаря, ни построения указателя (было 1,5 с на телефоне); статья разбирается, когда открыта.
    Поэтому и Web Worker не понадобился: разбирать в нём нечего. Замер по шагам — Slovar.zamer (видно в шестерёнке «Словаря»).
@@ -62,68 +66,104 @@
     const hl = new DataView(buf).getUint32(0, true), h = JSON.parse(dec.decode(new Uint8Array(buf, 4, hl))), base = 4 + hl;
     const u8 = n => new Uint8Array(buf, base + h.sec[n][0], h.sec[n][1]), u32 = n => new Uint32Array(buf, base + h.sec[n][0], h.sec[n][1] / 4);
     const ix = n => ({ K: u8(n + 'K'), Ko: u32(n + 'Ko'), Po: u32(n + 'Po'), P: u32(n + 'P') });
-    return { n: h.n, zvuk: h.zvuk, zvukP: h.zvukP, golos: h.golos || 'athina', ptr: p, g: ix('g'), ru: ix('ru'), la: ix('la'),
-      rB: u8('rB'), rO: u32('rO'), sO: u32('sO'), s: null, sP: null, art: new Map() };
+    const d = { n: h.n, zvuk: h.zvuk, zvukP: h.zvukP, golos: h.golos || 'athina', ptr: p, g: ix('g'), ru: ix('ru'), la: ix('la'),
+      rB: u8('rB'), rO: u32('rO'), sO: u32('sO'), s: null, sP: null, art: new Map(), pp: null };
+    if (h.sec.S) Object.assign(d, { s: u8('S'), O: u32('O'), X: new Set(u32('X')) });  /* поправка: статьи — тут же */
+    return d;
+  }
+  /* основа и поправка: из кэша, а нет — со связью; статьи основы — следом, поиск их не ждёт */
+  async function otkryt(c, p, prog, zam) {  /* zam — замер открытия (фоновое обновление его не трогает) */
+    const sP = fayl(c, p.stati, prog), pP = p.popravka ? fayl(c, p.popravka).then(r => r.arrayBuffer()) : null;
+    const buf = await (await fayl(c, p.index, prog)).arrayBuffer(); zam && mark('i');
+    const d = razobrat(buf, p);
+    if (pP) d.pp = razobrat(await pP, p);
+    d.sP = sP.then(r => r.arrayBuffer()).then(b => { d.s = new Uint8Array(b); zam && mark('s'); return d.s; });
+    return d;
   }
   function load(onProgress) {
     if (D) return Promise.resolve(D);
     return loading || (loading = (async () => {
       const c = await caches.open(CACHE), p = await pointer(c); mark('ptr');
       let got = 0; const prog = n => { got += n; onProgress && onProgress(got / ((p.gzI + p.gzS) || 2.3e7)); };
-      const sP = fayl(c, p.stati, prog);  /* статьи — следом, параллельно: поиск их не ждёт */
-      const buf = await (await fayl(c, p.index, prog)).arrayBuffer(); mark('i');
-      D = razobrat(buf, p); mark('ready');
-      D.sP = sP.then(r => r.arrayBuffer()).then(b => { D.s = new Uint8Array(b); mark('s'); return D.s; });
+      D = await otkryt(c, p, prog, true); mark('ready');
       D.sP.then(async () => {
-        await c.put(ckey(PTR), new Response(JSON.stringify(p)));  /* версия — в кэш, когда оба файла там */
+        await c.put(ckey(PTR), new Response(JSON.stringify(p)));  /* версия — в кэш, когда все файлы там */
         console.info('slovar: открыт, мс от начала страницы', JSON.stringify(zamer));
         await uborka(c, p);
-        if (navigator.onLine) { obnovit(c, p); setTimeout(() => tbVse().catch(() => {}), 1500); }  /* таблицы — в фоне: без сети они тоже нужны */
+        if (navigator.onLine) { proverit(); setTimeout(() => tbVse().catch(() => {}), 1500); }  /* таблицы — в фоне: без сети они тоже нужны */
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') proverit(); });
+        setInterval(() => { if (document.visibilityState === 'visible') proverit(); }, 3 * 3600e3);
       }).catch(e => console.warn('slovar: статьи', e));
       return D;
     })().catch(e => { loading = null; D = null; throw e; }));
   }
-  /* новая версия словаря — в фоне: оба файла в кэш, потом версия; вступит при следующем открытии */
-  async function obnovit(c, p) {
-    try {
-      const r = await EK.remote(PTR); if (!r.ok) return;
-      const n = await r.json();
-      if (n.index === p.index && n.stati === p.stati) return;
-      await fayl(c, n.index); await fayl(c, n.stati);
-      await c.put(ckey(PTR), new Response(JSON.stringify(n)));
-      console.info('slovar: новая версия скачана — со следующего открытия', n.index);
-    } catch (e) { console.warn('slovar: обновление', e); }
+  /* новая версия словаря — в фоне, тихо: при открытии, при каждом возврате в приложение (не чаще раза в 5 минут) и раз
+     в три часа. Изменилась только поправка — качается она одна (килобайты-мегабайты), основа — целиком (редко).
+     Скачанное подменяет словарь сразу: следующее открытое слово и следующий поиск — уже по новой версии */
+  let checking = null, checked = 0;
+  function proverit(sejchas) {
+    if (!D || checking || !navigator.onLine || (!sejchas && Date.now() - checked < 5 * 60e3)) return checking;
+    return checking = (async () => {
+      try {
+        const r = await EK.remote(PTR); if (!r.ok) return;
+        const n = await r.json(), p = D.ptr;
+        checked = Date.now();
+        if (n.index === p.index && n.stati === p.stati && (n.popravka || '') === (p.popravka || '') && String(n.tablicyF) === String(p.tablicyF)) return;
+        const c = await caches.open(CACHE), d = await otkryt(c, n);
+        await d.sP;
+        await c.put(ckey(PTR), new Response(JSON.stringify(n)));
+        if (String(n.tablicyF) !== String(p.tablicyF)) { TB.clear(); tbLoading.clear(); }
+        D = d;
+        await uborka(c, n);
+        tbVse().catch(() => {});
+        console.info('slovar: новая версия —', n.index, n.popravka || 'без поправки', `(${n.popravkaN || 0} статей)`);
+        window.dispatchEvent(new Event('slovar-novoe'));
+      } catch (e) { console.warn('slovar: обновление', e); } finally { checking = null; }
+    })();
   }
   /* в кэше — только нынешние файлы (и уже скачанной новой версии): прошлый словарь на телефоне не копится */
   async function uborka(c, p) {
     const hit = await c.match(ckey(PTR)), q = hit ? await hit.json().catch(() => null) : null;
     for (const r of await c.keys()) if (!nuzhen(r.url, [p, q])) c.delete(r);
   }
-  const nuzhen = (url, ps) => url === ckey(PTR) || ps.some(p => p && p.index && (url === ckey(raspak(p.index)) || url === ckey(raspak(p.stati))
-    || (!!p.tablicy && url.startsWith(ckey(p.tablicy + '-')))));
+  const nuzhen = (url, ps) => url === ckey(PTR) || ps.some(p => p && p.index && [p.index, p.stati, p.popravka, ...(p.tablicyF || [])]
+    .some(f => f && url === ckey(raspak(f)) || f && url === ckey(f) && /tablicy-/.test(f)));
+  /* номер статьи: основа — 0…D.n−1, поправка — D.n + j */
+  const src = i => i < D.n ? [D, i] : [D.pp, i - D.n];
+  const ubrana = i => i < D.n && !!D.pp && D.pp.X.has(i);  /* статья основы, которую поправка заменила или удалила */
+  const rk = i => i < D.n ? i : D.pp.O[i - D.n] - 1 + (i - D.n + 1) / (D.pp.n + 1);  /* место по частоте */
+  const byRk = (a, b) => rk(a) - rk(b);
   /* строка списка: лемма, заголовок, значения — из указателя, без разбора статьи */
   function row(i) {
-    const t = dec.decode(D.rB.subarray(D.rO[i], D.rO[i + 1])), a = t.indexOf('\t'), b = t.indexOf('\t', a + 1);
+    const [d, j] = src(i);
+    const t = dec.decode(d.rB.subarray(d.rO[j], d.rO[j + 1])), a = t.indexOf('\t'), b = t.indexOf('\t', a + 1);
     return { l: t.slice(0, a), s: t.slice(a + 1, b), z: t.slice(b + 1).split('\x1f') };
   }
   const brief = z => z.slice(0, 3).join('; ');
   function by(l) {  /* лемма → номер: заголовок всегда есть среди греческих ключей */
-    const c = exact(D.g, gr(l));
-    if (c) for (const i of c) if (row(i).l === l) return i;
+    for (const i of exactAll('g', gr(l))) if (row(i).l === l) return i;
     return undefined;
   }
   async function stat(i) {  /* статья целиком — разбирается при открытии; статьи ещё читаются — подождать */
-    if (D.art.has(i)) return D.art.get(i);
-    const s = D.s || await D.sP;
-    const x = JSON.parse(dec.decode(s.subarray(D.sO[i], D.sO[i + 1] - 1)));
-    if (D.art.size > 50) D.art.delete(D.art.keys().next().value);
-    D.art.set(i, x); return x;
+    const d0 = D;
+    if (d0.art.has(i)) return d0.art.get(i);
+    const [d, j] = src(i), s = d.s || await d.sP;
+    const x = JSON.parse(dec.decode(s.subarray(d.sO[j], d.sO[j + 1] - 1)));
+    if (d0.art.size > 50) d0.art.delete(d0.art.keys().next().value);
+    d0.art.set(i, x); return x;
+  }
+  /* самые частые k статей — с поправкой */
+  function chastye(k) {
+    const out = [];
+    for (let i = 0; i < D.n && out.length < k; i++) if (!ubrana(i)) out.push(i);
+    if (D.pp) for (let j = 0; j < D.pp.n; j++) if (D.pp.O[j] <= k) out.push(D.n + j);
+    return out.sort(byRk).slice(0, k);
   }
   /* таблицы спряжения и склонения — 16 частей по слову (tools/slovar_telefon.py): разбирается только часть открытого
      слова (весь файл — 86 МБ JSON, телефону тяжело), все части — в фоне в кэш, сжатыми: без сети тоже работают */
   const TB = new Map(), tbLoading = new Map();
   const tbPart = l => [...l].reduce((a, ch) => a + ch.codePointAt(0), 0) % D.ptr.tablicyN;  /* то же — chast_tablic в tools/slovar_telefon.py */
-  const tbFile = i => `${D.ptr.tablicy}-${String(i).padStart(2, '0')}.json.gz`;
+  const tbFile = i => D.ptr.tablicyF ? D.ptr.tablicyF[i] : `${D.ptr.tablicy}-${String(i).padStart(2, '0')}.json.gz`;  /* у части — свой отпечаток */
   async function tbGz(i) {  /* сжатая часть: из кэша, а нет — со связью и в кэш */
     const c = await caches.open(CACHE), k = ckey(tbFile(i));
     let hit = await c.match(k);
@@ -136,7 +176,7 @@
     return hit;
   }
   function tablicy(l) {  /* → блоки таблиц слова или null */
-    if (!D || !D.ptr.tablicy || !D.ptr.tablicyN) return Promise.reject(new Error('нет таблиц'));
+    if (!D || !(D.ptr.tablicyF || D.ptr.tablicy) || !D.ptr.tablicyN) return Promise.reject(new Error('нет таблиц'));
     const i = tbPart(l);
     if (TB.has(i)) return Promise.resolve(TB.get(i)[l] || null);
     if (!tbLoading.has(i)) tbLoading.set(i, tbGz(i).then(r => new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).json())
@@ -167,21 +207,37 @@
     }
     return out;
   }
+  /* точное совпадение ключа в основе и поправке → номера (без убранных); у поправки — с её порядком внутри */
+  function exactAll(name, key) {
+    const a = exact(D[name], key), out = [];
+    if (a) for (const i of a) if (!ubrana(i)) out.push(i);
+    const b = D.pp && exact(D.pp[name], key);
+    if (b) for (const j of b) out.push(D.n + j);
+    return out;
+  }
+  function prefixAll(name, key, lim, set) {  /* номера статей по ключам, что начинаются с key, — в set */
+    for (const j of prefix(D[name], key, lim)) for (const i of ids(D[name], j)) if (!ubrana(i)) set.add(i);
+    if (D.pp) for (const j of prefix(D.pp[name], key, lim)) for (const i of ids(D.pp[name], j)) set.add(D.n + i);
+    return set;
+  }
   function search(q) {
     q = chist(q.trim()); if (!q) return [];
-    const byRank = (a, b) => a - b;
     if (isGr(q)) {  /* сначала точное (заголовок, затем форма — так сложено в файле), потом начало слова — всё по частоте */
       let k = gr(q);
-      if (/\s/.test(k) && !exact(D.g, k)) { const w = k.split(/\s+/).map(chist).filter(x => x && !AUX.has(x)); if (w.length) k = w[w.length - 1]; }
-      const pre = new Set(); for (const j of prefix(D.g, k, 600)) for (const i of ids(D.g, j)) pre.add(i);
-      return [...new Set([...(exact(D.g, k) || []), ...[...pre].sort(byRank)])];
+      if (/\s/.test(k) && !exactAll('g', k).length) { const w = k.split(/\s+/).map(chist).filter(x => x && !AUX.has(x)); if (w.length) k = w[w.length - 1]; }
+      let ex = exactAll('g', k);
+      if (D.pp && ex.some(i => i >= D.n)) {  /* есть статьи поправки — заново: сначала заголовок, потом по частоте */
+        const z = new Map(ex.map(i => [i, gr(row(i).l) !== k]));
+        ex = ex.sort((a, b) => z.get(a) - z.get(b) || byRk(a, b));
+      }
+      return [...new Set([...ex, ...[...prefixAll('g', k, 600, new Set())].sort(byRk)])];
     }
     if (isRu(q)) {
       const words = ru(q).split(/[^а-яa-z-]+/).filter(w => w.length > 1 && !STOP.has(w));
       if (!words.length) return [];
       let common = null;
       for (const w of words) {
-        const s = new Set(exact(D.ru, w) || []); for (const j of prefix(D.ru, w, 400)) for (const i of ids(D.ru, j)) s.add(i);
+        const s = prefixAll('ru', w, 400, new Set(exactAll('ru', w)));
         common = common ? new Set([...common].filter(i => s.has(i))) : s;
       }
       const w = words[0], whole = new RegExp('(^|[^а-яa-z])' + w.replace(/[-]/g, '\\-') + '($|[^а-яa-z])');
@@ -196,11 +252,10 @@
         return best;
       };
       const sc = new Map([...(common || [])].map(i => [i, score(i)]));
-      return [...sc.keys()].sort((a, b) => sc.get(a) - sc.get(b) || a - b);
+      return [...sc.keys()].sort((a, b) => sc.get(a) - sc.get(b) || byRk(a, b));
     }
-    const k = lat(q), ex = new Set(exact(D.la, k) || []), s = new Set(ex);
-    for (const j of prefix(D.la, k, 600)) for (const i of ids(D.la, j)) s.add(i);
-    return [...s].sort((a, b) => ex.has(b) - ex.has(a) || a - b);
+    const k = lat(q), ex = new Set(exactAll('la', k)), s = prefixAll('la', k, 600, new Set(ex));
+    return [...s].sort((a, b) => ex.has(b) - ex.has(a) || byRk(a, b));
   }
 
   /* --- звук: Azure из хранилища (в кэш), иначе голос телефона --- */
@@ -409,10 +464,10 @@
   /* слово → лемма его статьи: точное совпадение по заголовку и всем формам, как в search(). Несколько — заголовок буква
      в букву с ударением («Ο» → ο, «θα» → θα), иначе самая частая (номера идут по частоте): «μου» → εγώ, не редкое μού */
   function slovoLemma(w) {
-    const c = D && exact(D.g, gr(w)); if (!c || !c.length) return null;
+    const c = D && exactAll('g', gr(w)); if (!c || !c.length) return null;
     const lw = w.normalize('NFC').toLowerCase();
     for (const i of c) { const l = row(i).l; if (l.normalize('NFC').toLowerCase() === lw) return l; }
-    return row(Math.min(...c)).l;
+    return row(c.reduce((a, b) => rk(b) < rk(a) ? b : a)).l;
   }
   const rowHtml = r => `<button data-l="${esc(r.l)}"><span class="w" lang="el">${esc(r.s)}</span><span class="t">${esc(r.b)}</span></button>`;
   const rowOf = i => { const r = row(i); return { l: r.l, s: r.s, b: brief(r.z) }; };
@@ -434,7 +489,7 @@
     if (window.ResizeObserver) new ResizeObserver(refit).observe($('.slv-row')); else addEventListener('resize', refit);  /* строка поиска меняется с шириной и шрифтом, но не от подбора кегля */
     if (document.fonts) document.fonts.ready.then(refit);
 
-    const status = () => { st.textContent = D ? `${num(D.n)} статей · ищется по-гречески, латиницей и по-русски` : ''; };
+    const status = () => { st.textContent = D ? `${num(D.ptr.n || D.n)} статей · ищется по-гречески, латиницей и по-русски` : ''; };
     function drawList() {
       const val = q.value.trim();
       if (!val) {  /* «Недавние» — из памяти телефона, видны и пока словарь открывается */
@@ -444,7 +499,7 @@
           if (rec.length) try { localStorage.setItem(RECENT2, JSON.stringify(rec)); } catch (e) {}
         }
         list.innerHTML = rec.length ? '<h3>Недавние</h3>' + rec.map(rowHtml).join('')
-          : D ? '<h3>Самые частые</h3>' + Array.from({ length: Math.min(50, D.n) }, (_, i) => rowHtml(rowOf(i))).join('') : '';
+          : D ? '<h3>Самые частые</h3>' + chastye(50).map(i => rowHtml(rowOf(i))).join('') : '';
         return;
       }
       if (!D) return;
@@ -452,6 +507,8 @@
       list.innerHTML = res.slice(0, shown).map(i => rowHtml(rowOf(i))).join('') + (res.length > shown ? `<button class="more" data-more="1">ещё ${num(Math.min(100, res.length - shown))} из ${num(res.length - shown)}</button>` : '');
     }
     const run = () => { if (!D) return; res = search(q.value); shown = 100; drawList(); };
+    /* словарь обновился в фоне (proverit) — номера статей другие: список заново, тихо; открытая статья остаётся */
+    window.addEventListener('slovar-novoe', () => { status(); if (!cur) { if (q.value.trim()) { res = search(q.value); drawList(); } else drawList(); } });
     let t = 0;
     q.addEventListener('input', () => {
       if (cur) { cur = null; curS = null; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
@@ -572,5 +629,5 @@
     return api;
   }
 
-  window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer };
+  window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true) };
 })();

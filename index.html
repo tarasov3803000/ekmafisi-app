@@ -469,11 +469,14 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 <script src="sync.js"></script>
 <button id="upd" class="upd hidden">Новая версия — обновить</button>
 <script>
-/* обновление по воздуху: новая оболочка скачивается сама (при открытии и каждом возвращении в приложение);
-   встала — на полке или экране входа страница перезапускается сама, посреди занятия — полоска «Новая версия — обновить» */
+/* обновление по воздуху: новая оболочка скачивается сама (при открытии, уходя, возвращаясь и раз в полчаса);
+   встала — на полке или экране входа страница перезапускается сама, посреди занятия — полоска «Новая версия — обновить».
+   Встала, пока приложение было свёрнуто, — при возврате то же самое, без второго запуска (решение 18.11.2026) */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    const upd = () => reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', upd);
+    setInterval(upd, 30 * 60e3);
   });
   let had = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -481,6 +484,7 @@ if ('serviceWorker' in navigator) {
     window.EK_UPDATE = true;
     if (!window.EK_APP) location.reload(); else window.dispatchEvent(new Event('ekmafisi-update'));
   });
+  document.addEventListener('visibilitychange', () => { if (window.EK_UPDATE && window.EK_APP) window.dispatchEvent(new Event('ekmafisi-update')); });
 }
 document.getElementById('upd').onclick = () => location.reload();
 </script>
