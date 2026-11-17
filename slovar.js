@@ -1,15 +1,21 @@
 /* Словарь — общий модуль экрана «Словарь» в Экмафиси и отдельного приложения «Словарь» (slovar-app/).
-   Данные: весь свой словарь одним файлом из закрытого хранилища (tools/slovar_telefon.py):
-     el/slovar-vse.json — указатель { file, n, gz } (со связью — всякий раз заново);
-     el/slovar-vse-<отпечаток>.json.gz — один раз, распаковка DecompressionStream, кладётся распакованным в свой кэш.
-   Дальше — без сети. Новый отпечаток — новый файл, старый из кэша вон.
-   Поиск: греческий без ударений и по частым формам; латиница (транслитерация); русский — по словам значений вне скобок.
+   Данные: весь свой словарь из закрытого хранилища, формат 2 (tools/slovar_telefon.py, 17.11.2026):
+     el/slovar2.json — версия { index, stati, gzI, gzS, tablicy… }: из кэша сразу, со связью — в фоне после открытия;
+       новая версия скачивается в фоне и вступает при следующем открытии;
+     el/slovar2-i-<отп>.bin.gz — указатель поиска, готовый (ключи по порядку байтов, номера — Uint32), и строки списка;
+     el/slovar2-s-<отп>.txt.gz — статьи, по одной в строке.
+   Оба — один раз, распаковка DecompressionStream, распакованными в свой кэш. Открытие — только чтение байтов из кэша:
+   ни JSON.parse всего словаря, ни построения указателя (было 1,5 с на телефоне); статья разбирается, когда открыта.
+   Поэтому и Web Worker не понадобился: разбирать в нём нечего. Замер по шагам — Slovar.zamer (видно в шестерёнке «Словаря»).
+   Поиск: греческий без ударений и по всем формам; латиница (транслитерация); русский — по словам значений вне скобок.
    Звук слова и примера: голос Azure — озвученный заранее (el/zvuk-slov/<голос>/<a>.mp4, el/zvuk-prim/<голос>/<a>.mp4),
    иначе по запросу через функцию golos (el/zvuk-zapros/<голос>/<sha16>.mp3); всё — в кэш при первом нажатии.
    Нет сети, предел месяца или отказ — голос телефона el-GR.
    Хост даёт: EK.remote(путь) → fetch-ответ из хранилища; переходы — onPick(lemma) и onBack(); показ — api.show(lemma | null). */
 (() => {
-  const CACHE = 'ekmafisi-slovar-v1', ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = 'el/slovar-vse.json', RECENT = 'ekmafisi.slovar.nedavno';
+  const CACHE = 'ekmafisi-slovar-v1', ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = 'el/slovar2.json', RECENT = 'ekmafisi.slovar.nedavno';
+  const RECENT2 = 'ekmafisi.slovar.nedavno2';  /* недавние со строкой списка { l, s, b } — видны, пока словарь открывается */
+  const SKOR = 'slovar-skorost';  /* скорость голоса 0,8 · 0,9 · 1 (решение 17.11.2026: по умолчанию 0,9), общая с Экмафиси */
   const ckey = p => new URL('slovar/' + p, location.origin + '/').href;  /* ключ кэша — один на оба приложения (один адрес github.io) */
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const num = n => Number(n).toLocaleString('ru-RU');
@@ -26,66 +32,95 @@
   const readJ = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
 
   /* --- данные --- */
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const zamer = {};  /* замер по шагам, мс от начала страницы: ptr — версия, i — указатель поиска прочитан, ready — поиск готов, s — статьи */
+  const mark = k => { zamer[k] = Math.round(performance.now()); };
   let D = null, loading = null;
-  async function pointer() {
-    const c = await caches.open(CACHE), k = ckey(PTR), hit = await c.match(k);
-    if (navigator.onLine) try {
-      /* связь плохая, а словарь уже есть — ждать не дольше 4 с, дальше открыть, что есть */
-      const net = EK.remote(PTR).then(async r => { if (!r.ok) throw new Error(r.status); const p = await r.json(); await c.put(k, new Response(JSON.stringify(p))); return p; });
-      return await (hit ? Promise.race([net, new Promise((_, no) => setTimeout(() => no(new Error('медленно')), 4000))]) : net);
-    } catch (e) { console.warn('slovar: указатель', e); }
+  async function pointer(c) {  /* версия словаря: из кэша сразу; нет — со связью (в кэш ляжет, когда оба файла скачаны) */
+    const hit = await c.match(ckey(PTR));
     if (hit) return hit.json();
-    throw new Error(navigator.onLine ? 'Словарь не загрузился. Попробуйте ещё раз.' : 'Нет сети, а словарь на этом телефоне ещё не загружался. Откройте один раз со связью.');
+    if (!navigator.onLine) throw new Error('Нет сети, а словарь на этом телефоне ещё не загружался. Откройте один раз со связью.');
+    const r = await EK.remote(PTR);
+    if (!r.ok) throw new Error('Словарь не загрузился. Попробуйте ещё раз.');
+    return r.json();
   }
-  async function fetchData(p, onProgress) {
-    const c = await caches.open(CACHE), k = ckey(p.file.replace(/\.gz$/, ''));
+  const raspak = path => path.replace(/\.gz$/, '');
+  async function fayl(c, path, got) {  /* распакованный файл: из кэша; нет — со связью, распаковка потоком прямо в кэш */
+    const k = ckey(raspak(path));
     let hit = await c.match(k);
     if (!hit) {
-      const r = await EK.remote(p.file);
+      const r = await EK.remote(path);
       if (!r.ok) throw new Error('Словарь не загрузился: ' + r.status);
-      let got = 0;
-      const count = new TransformStream({ transform(ch, ctl) { got += ch.byteLength; onProgress && onProgress(got / (p.gz || 6e6)); ctl.enqueue(ch); } });
-      const txt = await new Response(r.body.pipeThrough(count).pipeThrough(new DecompressionStream('gzip'))).text();
-      await c.put(k, new Response(txt, { headers: { 'Content-Type': 'application/json' } }));
-      c.keys().then(ks => ks.forEach(q => nuzhen(q.url, p, k) || c.delete(q)));  /* прежние версии — вон */
-      hit = new Response(txt);
+      const count = new TransformStream({ transform(ch, ctl) { got && got(ch.byteLength); ctl.enqueue(ch); } });
+      await c.put(k, new Response(r.body.pipeThrough(count).pipeThrough(new DecompressionStream('gzip'))));
+      hit = await c.match(k);
     }
-    return hit.json();
+    return hit;
   }
-  function index(d) {
-    const S = d.S, grI = new Map(), ruI = new Map(), laI = new Map();
-    const add = (m, key, i) => { if (!key) return; const a = m.get(key); if (!a) m.set(key, [i]); else if (a[a.length - 1] !== i) a.push(i); };
-    S.forEach((s, i) => {
-      add(grI, gr(s.l), i);
-      for (const w of s.s.split(/[\s/]+/)) if (w.length > 2) add(grI, gr(w), i);  /* «ο άνθρωπος», «ο/η γιατρός» — и по второму слову */
-      for (const f of s.c || []) add(grI, gr(f), i);
-      if (s.v) add(grI, gr(s.v), i);
-      if (s.t) add(laI, lat(s.t), i);
-      for (const z of s.z) {
-        const bez = ru(z.ru).replace(/\([^)]*\)/g, ' ');  /* «ставить (вертикально)» ищется по «ставить», не по «вертикально» */
-        for (const w of bez.split(/[^а-яa-z-]+/)) { const key = w.replace(/^-+|-+$/g, ''); if (key.length > 1 && !STOP.has(key)) add(ruI, key, i); }
-      }
-    });
-    /* все формы из таблиц склонения и спряжения (tools/slovar_telefon.py, поле F: форма без ударений → номера статей) */
-    for (const k in d.F || {}) for (const i of d.F[k]) add(grI, k, i);
-    const keys = m => [...m.keys()].sort();
-    return { S, n: S.length, zvuk: d.zvuk, zvukP: d.zvukP, golos: d.golos || 'athina', by: new Map(S.map((s, i) => [s.l, i])), grI, ruI, laI, grK: keys(grI), ruK: keys(ruI), laK: keys(laI) };
+  /* указатель поиска — как есть, байтами: заголовок JSON и части по 4 байта (tools/slovar_telefon.py, dvoichnyj) */
+  function razobrat(buf, p) {
+    const hl = new DataView(buf).getUint32(0, true), h = JSON.parse(dec.decode(new Uint8Array(buf, 4, hl))), base = 4 + hl;
+    const u8 = n => new Uint8Array(buf, base + h.sec[n][0], h.sec[n][1]), u32 = n => new Uint32Array(buf, base + h.sec[n][0], h.sec[n][1] / 4);
+    const ix = n => ({ K: u8(n + 'K'), Ko: u32(n + 'Ko'), Po: u32(n + 'Po'), P: u32(n + 'P') });
+    return { n: h.n, zvuk: h.zvuk, zvukP: h.zvukP, golos: h.golos || 'athina', ptr: p, g: ix('g'), ru: ix('ru'), la: ix('la'),
+      rB: u8('rB'), rO: u32('rO'), sO: u32('sO'), s: null, sP: null, art: new Map() };
   }
   function load(onProgress) {
     if (D) return Promise.resolve(D);
-    return loading || (loading = pointer().then(p => fetchData(p, onProgress).then(d => { D = index(d); D.ptr = p; return D; }))
-      .then(D => { uborka(D.ptr); if (navigator.onLine) setTimeout(() => tbVse().catch(() => {}), 1500); return D; })  /* таблицы — следом, в фоне: без сети они тоже нужны */
-      .catch(e => { loading = null; throw e; }));
+    return loading || (loading = (async () => {
+      const c = await caches.open(CACHE), p = await pointer(c); mark('ptr');
+      let got = 0; const prog = n => { got += n; onProgress && onProgress(got / ((p.gzI + p.gzS) || 2.3e7)); };
+      const sP = fayl(c, p.stati, prog);  /* статьи — следом, параллельно: поиск их не ждёт */
+      const buf = await (await fayl(c, p.index, prog)).arrayBuffer(); mark('i');
+      D = razobrat(buf, p); mark('ready');
+      D.sP = sP.then(r => r.arrayBuffer()).then(b => { D.s = new Uint8Array(b); mark('s'); return D.s; });
+      D.sP.then(async () => {
+        await c.put(ckey(PTR), new Response(JSON.stringify(p)));  /* версия — в кэш, когда оба файла там */
+        console.info('slovar: открыт, мс от начала страницы', JSON.stringify(zamer));
+        await uborka(c, p);
+        if (navigator.onLine) { obnovit(c, p); setTimeout(() => tbVse().catch(() => {}), 1500); }  /* таблицы — в фоне: без сети они тоже нужны */
+      }).catch(e => console.warn('slovar: статьи', e));
+      return D;
+    })().catch(e => { loading = null; D = null; throw e; }));
   }
-  /* в кэше — только нынешние файлы: прошлый словарь (≈ 30 МБ) на телефоне не копится */
-  async function uborka(p) {
-    const c = await caches.open(CACHE);
-    for (const q of await c.keys()) if (!nuzhen(q.url, p)) c.delete(q);
+  /* новая версия словаря — в фоне: оба файла в кэш, потом версия; вступит при следующем открытии */
+  async function obnovit(c, p) {
+    try {
+      const r = await EK.remote(PTR); if (!r.ok) return;
+      const n = await r.json();
+      if (n.index === p.index && n.stati === p.stati) return;
+      await fayl(c, n.index); await fayl(c, n.stati);
+      await c.put(ckey(PTR), new Response(JSON.stringify(n)));
+      console.info('slovar: новая версия скачана — со следующего открытия', n.index);
+    } catch (e) { console.warn('slovar: обновление', e); }
   }
-  /* нынешние файлы: указатель, словарь, части таблиц этой версии */
-  const nuzhen = (url, p, k) => url === k || url === ckey(PTR) || url === ckey(p.file.replace(/\.gz$/, '')) || (!!p.tablicy && url.startsWith(ckey(p.tablicy + '-')));
+  /* в кэше — только нынешние файлы (и уже скачанной новой версии): прошлый словарь на телефоне не копится */
+  async function uborka(c, p) {
+    const hit = await c.match(ckey(PTR)), q = hit ? await hit.json().catch(() => null) : null;
+    for (const r of await c.keys()) if (!nuzhen(r.url, [p, q])) c.delete(r);
+  }
+  const nuzhen = (url, ps) => url === ckey(PTR) || ps.some(p => p && p.index && (url === ckey(raspak(p.index)) || url === ckey(raspak(p.stati))
+    || (!!p.tablicy && url.startsWith(ckey(p.tablicy + '-')))));
+  /* строка списка: лемма, заголовок, значения — из указателя, без разбора статьи */
+  function row(i) {
+    const t = dec.decode(D.rB.subarray(D.rO[i], D.rO[i + 1])), a = t.indexOf('\t'), b = t.indexOf('\t', a + 1);
+    return { l: t.slice(0, a), s: t.slice(a + 1, b), z: t.slice(b + 1).split('\x1f') };
+  }
+  const brief = z => z.slice(0, 3).join('; ');
+  function by(l) {  /* лемма → номер: заголовок всегда есть среди греческих ключей */
+    const c = exact(D.g, gr(l));
+    if (c) for (const i of c) if (row(i).l === l) return i;
+    return undefined;
+  }
+  async function stat(i) {  /* статья целиком — разбирается при открытии; статьи ещё читаются — подождать */
+    if (D.art.has(i)) return D.art.get(i);
+    const s = D.s || await D.sP;
+    const x = JSON.parse(dec.decode(s.subarray(D.sO[i], D.sO[i + 1] - 1)));
+    if (D.art.size > 50) D.art.delete(D.art.keys().next().value);
+    D.art.set(i, x); return x;
+  }
   /* таблицы спряжения и склонения — 16 частей по слову (tools/slovar_telefon.py): разбирается только часть открытого
-     слова (весь файл — 64 МБ JSON, телефону тяжело), все части — в фоне в кэш, сжатыми: без сети тоже работают */
+     слова (весь файл — 86 МБ JSON, телефону тяжело), все части — в фоне в кэш, сжатыми: без сети тоже работают */
   const TB = new Map(), tbLoading = new Map();
   const tbPart = l => [...l].reduce((a, ch) => a + ch.codePointAt(0), 0) % D.ptr.tablicyN;  /* то же — chast_tablic в tools/slovar_telefon.py */
   const tbFile = i => `${D.ptr.tablicy}-${String(i).padStart(2, '0')}.json.gz`;
@@ -112,36 +147,48 @@
   const tbSync = l => { const i = tbPart(l); return TB.has(i) ? (TB.get(i)[l] || null) : undefined; };
   async function tbVse() { for (let i = 0; i < (D.ptr.tablicyN || 0); i++) await tbGz(i); }
 
-  /* --- поиск --- */
-  function prefix(keys, q, lim) {
-    let lo = 0, hi = keys.length;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (keys[m] < q) lo = m + 1; else hi = m; }
-    const out = []; for (let i = lo; i < keys.length && keys[i].startsWith(q) && out.length < lim; i++) out.push(keys[i]);
+  /* --- поиск: двоичный по ключам-байтам UTF-8 (порядок байтов = порядок, в котором их сложил tools/slovar_telefon.py) --- */
+  function cmp(ix, j, q) {  /* ключ j против запроса q (байты) */
+    const a = ix.Ko[j], n = ix.Ko[j + 1] - a, m = Math.min(n, q.length), K = ix.K;
+    for (let x = 0; x < m; x++) { const d = K[a + x] - q[x]; if (d) return d; }
+    return n - q.length;
+  }
+  function lower(ix, q) { let lo = 0, hi = ix.Ko.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (cmp(ix, m, q) < 0) lo = m + 1; else hi = m; } return lo; }
+  const ids = (ix, j) => ix.P.subarray(ix.Po[j], ix.Po[j + 1]);
+  function exact(ix, key) { const q = enc.encode(key), j = lower(ix, q); return j < ix.Ko.length - 1 && cmp(ix, j, q) === 0 ? ids(ix, j) : null; }
+  function prefix(ix, key, lim) {  /* ключи, что начинаются с key, кроме него самого → номера ключей */
+    const q = enc.encode(key), out = [], N = ix.Ko.length - 1;
+    for (let j = lower(ix, q); j < N && out.length < lim; j++) {
+      const a = ix.Ko[j], n = ix.Ko[j + 1] - a;
+      if (n < q.length) break;
+      let ok = true; for (let x = 0; x < q.length; x++) if (ix.K[a + x] !== q[x]) { ok = false; break; }
+      if (!ok) break;
+      if (n > q.length) out.push(j);
+    }
     return out;
   }
   function search(q) {
     q = chist(q.trim()); if (!q) return [];
     const byRank = (a, b) => a - b;
-    if (isGr(q)) {  /* сначала точное (заголовок, затем форма), потом начало слова — всё по частоте */
+    if (isGr(q)) {  /* сначала точное (заголовок, затем форма — так сложено в файле), потом начало слова — всё по частоте */
       let k = gr(q);
-      if (/\s/.test(k) && !D.grI.has(k)) { const w = k.split(/\s+/).map(chist).filter(x => x && !AUX.has(x)); if (w.length) k = w[w.length - 1]; }
-      const exact = (D.grI.get(k) || []).slice().sort((a, b) => (gr(D.S[b].l) === k) - (gr(D.S[a].l) === k) || a - b);
-      const pre = new Set(); for (const key of prefix(D.grK, k, 600)) if (key !== k) for (const i of D.grI.get(key)) pre.add(i);
-      return [...new Set([...exact, ...[...pre].sort(byRank)])];
+      if (/\s/.test(k) && !exact(D.g, k)) { const w = k.split(/\s+/).map(chist).filter(x => x && !AUX.has(x)); if (w.length) k = w[w.length - 1]; }
+      const pre = new Set(); for (const j of prefix(D.g, k, 600)) for (const i of ids(D.g, j)) pre.add(i);
+      return [...new Set([...(exact(D.g, k) || []), ...[...pre].sort(byRank)])];
     }
     if (isRu(q)) {
       const words = ru(q).split(/[^а-яa-z-]+/).filter(w => w.length > 1 && !STOP.has(w));
       if (!words.length) return [];
       let common = null;
       for (const w of words) {
-        const s = new Set(); for (const key of prefix(D.ruK, w, 400)) for (const i of D.ruI.get(key)) s.add(i);
+        const s = new Set(exact(D.ru, w) || []); for (const j of prefix(D.ru, w, 400)) for (const i of ids(D.ru, j)) s.add(i);
         common = common ? new Set([...common].filter(i => s.has(i))) : s;
       }
       const w = words[0], whole = new RegExp('(^|[^а-яa-z])' + w.replace(/[-]/g, '\\-') + '($|[^а-яa-z])');
       const score = i => {  /* 0 — слово стоит первым в первом значении; 1 — первым в каком-то значении; 2 — целым словом; 3 — началом слова */
-        const z = D.S[i].z; let best = 3;
+        const z = row(i).z; let best = 3;
         for (let j = 0; j < z.length; j++) {
-          const t = ru(z[j].ru).replace(/\([^)]*\)/g, '').trim();
+          const t = ru(z[j]).replace(/\([^)]*\)/g, '').trim();
           const first = t.split(/[,;]/)[0].trim();
           if (first === w || first.startsWith(w + ' ')) return j === 0 ? 0 : 1;
           if (best > 2 && whole.test(t)) best = 2;
@@ -151,12 +198,14 @@
       const sc = new Map([...(common || [])].map(i => [i, score(i)]));
       return [...sc.keys()].sort((a, b) => sc.get(a) - sc.get(b) || a - b);
     }
-    const s = new Set(); for (const key of prefix(D.laK, lat(q), 600)) for (const i of D.laI.get(key)) s.add(i);
-    const k = lat(q);
-    return [...s].sort((a, b) => (lat(D.S[b].t || '') === k) - (lat(D.S[a].t || '') === k) || a - b);
+    const k = lat(q), ex = new Set(exact(D.la, k) || []), s = new Set(ex);
+    for (const j of prefix(D.la, k, 600)) for (const i of ids(D.la, j)) s.add(i);
+    return [...s].sort((a, b) => ex.has(b) - ex.has(a) || a - b);
   }
 
   /* --- звук: Azure из хранилища (в кэш), иначе голос телефона --- */
+  /* скорость голоса: Azure — playbackRate с сохранением высоты (как у фраз Экмафиси), голос телефона — rate */
+  const skorost = () => { const v = +readJ(SKOR); return [0.8, 0.9, 1].includes(v) ? v : 0.9; };
   const elVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^el(-|_|$)/i.test(v.lang));
   let audio = null;
   /* что сказать: два-три артикля на выбор — один, мужской, если есть (ο/η γιατρός → ο γιατρός); так же — tools/azure_golos.py skazat и функция golos */
@@ -170,7 +219,7 @@
   function phoneVoice(text) {
     const v = elVoice(); if (!v) return false;
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang; u.rate = 0.9;
+    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang; u.rate = skorost();
     speechSynthesis.speak(u); return true;
   }
   async function zaprosKey(text) {  /* тот же отпечаток считает функция golos (supabase/functions/golos) */
@@ -203,6 +252,8 @@
       const b = await azureBlob(text, path);
       if (b) {
         audio = new Audio(URL.createObjectURL(b));
+        audio.preservesPitch = audio.webkitPreservesPitch = true;
+        audio.defaultPlaybackRate = audio.playbackRate = skorost();
         audio.onended = audio.onerror = done;
         await audio.play(); return;
       }
@@ -214,6 +265,7 @@
   /* --- вид --- */
   const CSS = `
 .slv { display: grid; gap: 14px; }
+.slv > *, .slv-art > *, .slv-art li, .slv-ph > div { min-width: 0; }  /* ни одно длинное слово не делает страницу шире экрана: сетка ужимается, слово переносится */
 .slv-q { width: 100%; font: calc(18px + var(--up, 0px)) var(--f-ui); padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); }
 .slv-q:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .slv-st { font-size: calc(14px + var(--up, 0px)); color: var(--muted); margin: 0; }
@@ -228,20 +280,24 @@
 .slv-list .w { font: calc(19px + var(--up, 0px))/1.25 var(--f-el); }
 .slv-list .t { font-size: calc(14px + var(--up, 0px)); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slv-list .more { text-align: center; color: var(--accent); font-weight: 600; }
-.slv-art { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; }
+.slv-art { overflow-wrap: break-word; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; }
 .slv.android .slv-back { display: none; }  /* на Android — системный жест «назад» */
 .slv-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .slv-back { justify-self: start; border: 0; background: none; color: var(--accent); font: 600 calc(15px + var(--up, 0px)) var(--f-ui); padding: 0; cursor: pointer; }
 .slv-row { display: flex; gap: 8px; align-items: center; }
 .slv-row .slv-q { flex: 1; min-width: 0; }
-/* значок звука — в em от слова: чуть выше строки слова на любом кегле */
-.slv-head { display: flex; align-items: center; gap: .3em; font: 600 calc(32px + var(--up, 0px))/1.15 var(--f-el); }
-.slv-head h1 { flex: 1; margin: 0; font: inherit; text-wrap: balance; }
+/* заголовок — всегда одна строка (решение 16.11.2026): слово с артиклями, значок таблиц и 🔊. Значки — в em от строки;
+   кегль слова растёт с масштабом, пока влезает, дальше его ужимает fitHead — не мельче основного текста.
+   min-width: 0 и contain: inline-size — иначе слово в одну строку распирает сетку страницы шире экрана (на 375 px с шрифтом +5
+   было 457–581 px), и Chrome показывает её «увеличенной». То же у строки под словом (.slv-meta) */
+.slv-head { contain: inline-size; display: flex; align-items: center; gap: .3em; font: 600 calc(32px + var(--up, 0px))/1.15 var(--f-el); }
+.slv-head h1 { flex: 1; min-width: 0; margin: 0; font: inherit; white-space: nowrap; overflow: hidden; }
+.slv-head h1.wrap { white-space: normal; overflow-wrap: break-word; }  /* сначала по пробелу после артикля */
 .slv-say { flex: none; width: 1.3em; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-grid; place-items: center; padding: 0; cursor: pointer; font-size: inherit; }
 .slv-say svg { width: 62%; height: 62%; }
 .slv-say.on { background: var(--accent); color: var(--accent-ink); }
 /* строка под словом — всегда одна: часть речи (цветная подложка), транскрипция, частота; не влезает — кегль не растёт */
-.slv-meta { margin: -4px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
+.slv-meta { contain: inline-size; margin: -4px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
 .slv-meta.fit { font-size: 14px; }
 .slv-meta > * { flex: none; }
 .slv-meta.cut .ipa { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -262,7 +318,13 @@
 .slv-pos[data-c=i] { background: light-dark(#fbe1ee, #43202f); color: light-dark(#9a2b62, #f2a3c8); }
 .slv-pos[data-c=pp] { background: light-dark(#ecf0d8, #2f3519); color: light-dark(#56651a, #c6d886); }
 .slv-tbbtn { flex: none; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; gap: .2em; padding: 0 .35em; cursor: pointer; font: 600 calc(15px + var(--up, 0px)) var(--f-ui); }
-.slv-head .slv-tbbtn { font-size: .45em; height: 2.9em; padding: 0 .8em; border-radius: .7em; }
+.slv-head .slv-tbbtn { width: 1.3em; height: 1.3em; padding: 0; border-radius: .3em; font-size: inherit; justify-content: center; }
+.slv-head .slv-tbbtn svg { width: 62%; height: 62%; }
+/* подсказка по долгому нажатию на значок («Склонение», «Спряжение», «Статья») */
+.slv-tip { position: fixed; z-index: 30; max-width: 70vw; background: var(--ink); color: var(--paper); font: 600 calc(14px + var(--up, 0px)) var(--f-ui); padding: 6px 10px; border-radius: 8px; pointer-events: none; box-shadow: 0 4px 16px rgb(0 0 0 / .25); }
+/* греческое в статье и списке — без выделения: касание не зовёт подсказки Google (Touch to Search), как .w в Экмафиси */
+.slv-art [lang="el"], .slv-list .w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.slv-head button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .slv-tbbtn svg { width: 1.3em; height: 1.3em; }
 .slv-tbbtn.on { background: var(--accent); color: var(--accent-ink); }
 .slv-tbs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
@@ -299,7 +361,6 @@
 `;
   const ANDROID = /android/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent);
   const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
-  const brief = s => s.z.slice(0, 3).map(z => z.ru).join('; ');
   const TBI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 10h18M3 15h18M10 4v16"/></svg>';
   const ARTI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7M9 19h4"/></svg>';
   const tbName = s => (s.p || '').startsWith('глагол') ? 'Спряжение' : 'Склонение';
@@ -327,6 +388,20 @@
     if (m.scrollWidth > m.clientWidth) m.classList.add('fit');
     if (m.scrollWidth > m.clientWidth) m.classList.add('cut');
   }
+  /* заголовок — одна строка: слово не влезает рядом со значками — кегль меньше, но не мельче основного текста статьи;
+     и тогда не влезает (очень длинное слово) — перенос, но страница шире экрана не становится */
+  function fitHead(h, art) {
+    const h1 = h && h.querySelector('h1'); if (!h1) return;
+    h1.style.fontSize = ''; h1.classList.remove('wrap');
+    if (h1.scrollWidth <= h1.clientWidth) return;
+    const full = parseFloat(getComputedStyle(h1).fontSize), min = parseFloat(getComputedStyle(art).fontSize);
+    let fs = Math.max(min, Math.floor(full * h1.clientWidth / h1.scrollWidth * 10) / 10);
+    h1.style.fontSize = fs + 'px';
+    while (h1.scrollWidth > h1.clientWidth && fs > min) { fs = Math.max(min, fs - 1); h1.style.fontSize = fs + 'px'; }
+    if (h1.scrollWidth > h1.clientWidth) h1.classList.add('wrap');
+  }
+  const rowHtml = r => `<button data-l="${esc(r.l)}"><span class="w" lang="el">${esc(r.s)}</span><span class="t">${esc(r.b)}</span></button>`;
+  const rowOf = i => { const r = row(i); return { l: r.l, s: r.s, b: brief(r.z) }; };
   function mount(root, opts) {
     if (!document.getElementById('slv-css')) { const st = document.createElement('style'); st.id = 'slv-css'; st.textContent = CSS; document.head.appendChild(st); }
     /* поле без подсказок: нестандартное name/id, autocomplete/autocorrect выкл. — Chrome не подставляет прошлые вводы, клавиатура не правит */
@@ -335,62 +410,90 @@
       <p class="slv-st"></p><div class="slv-bar hidden"><i></i></div>
       <div class="slv-list"></div>
       <article class="slv-art hidden"></article></div>`;
+    root.style.minWidth = '0';  /* и в сетке страницы-хозяина */
     if (opts.aside) root.querySelector('.slv-row').appendChild(opts.aside);  /* шестерёнка приложения — в строку поиска, справа */
-    addEventListener('resize', () => cur && fitMeta(art.querySelector('.slv-meta')));  /* поворот экрана — строку под словом заново */
     const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
-    let res = [], shown = 100, cur = null, want = null, listY = 0, mode = null, wantM = null;
+    let res = [], shown = 100, cur = null, curS = null, want = null, listY = 0, mode = null, wantM = null, showTok = 0;
+    /* шрифт сменили, экран повернули, шрифт догрузился — заголовок и строку под ним заново */
+    const refit = () => { if (cur) { fitHead(art.querySelector('.slv-head'), art); fitMeta(art.querySelector('.slv-meta')); } };
+    if (window.ResizeObserver) new ResizeObserver(refit).observe($('.slv-row')); else addEventListener('resize', refit);  /* строка поиска меняется с шириной и шрифтом, но не от подбора кегля */
+    if (document.fonts) document.fonts.ready.then(refit);
 
     const status = () => { st.textContent = D ? `${num(D.n)} статей · ищется по-гречески, латиницей и по-русски` : ''; };
     function drawList() {
-      if (!D) return;
-      const val = q.value.trim(), row = i => { const s = D.S[i]; return `<button data-i="${i}"><span class="w">${esc(s.s)}</span><span class="t">${esc(brief(s))}</span></button>`; };
-      if (!val) {
-        const rec = (readJ(RECENT) || []).map(l => D.by.get(l)).filter(i => i !== undefined);
-        list.innerHTML = rec.length ? '<h3>Недавние</h3>' + rec.map(row).join('')
-          : '<h3>Самые частые</h3>' + D.S.slice(0, 50).map((_, i) => row(i)).join('');
+      const val = q.value.trim();
+      if (!val) {  /* «Недавние» — из памяти телефона, видны и пока словарь открывается */
+        let rec = readJ(RECENT2) || [];
+        if (!rec.length && D) {  /* прежний список (только леммы) — один раз в новый */
+          rec = (readJ(RECENT) || []).map(by).filter(i => i !== undefined).map(rowOf);
+          if (rec.length) try { localStorage.setItem(RECENT2, JSON.stringify(rec)); } catch (e) {}
+        }
+        list.innerHTML = rec.length ? '<h3>Недавние</h3>' + rec.map(rowHtml).join('')
+          : D ? '<h3>Самые частые</h3>' + Array.from({ length: Math.min(50, D.n) }, (_, i) => rowHtml(rowOf(i))).join('') : '';
         return;
       }
+      if (!D) return;
       if (!res.length) { list.innerHTML = `<h3>Ничего не нашлось</h3>`; return; }
-      list.innerHTML = res.slice(0, shown).map(row).join('') + (res.length > shown ? `<button class="more" data-more="1">ещё ${num(Math.min(100, res.length - shown))} из ${num(res.length - shown)}</button>` : '');
+      list.innerHTML = res.slice(0, shown).map(i => rowHtml(rowOf(i))).join('') + (res.length > shown ? `<button class="more" data-more="1">ещё ${num(Math.min(100, res.length - shown))} из ${num(res.length - shown)}</button>` : '');
     }
     const run = () => { if (!D) return; res = search(q.value); shown = 100; drawList(); };
     let t = 0;
     q.addEventListener('input', () => {
-      if (cur) { cur = null; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
+      if (cur) { cur = null; curS = null; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
       clearTimeout(t); t = setTimeout(run, 120);
     });
-    q.addEventListener('keydown', e => { if (e.key === 'Enter' && res.length) { q.blur(); pick(D.S[res[0]].l); } });
+    q.addEventListener('keydown', e => { if (e.key === 'Enter' && res.length) { q.blur(); pick(row(res[0]).l); } });
     list.addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.more) { shown += 100; drawList(); return; }
-      pick(D.S[+b.dataset.i].l);
+      pick(b.dataset.l);
     });
     const pick = (l, m) => opts.onPick ? opts.onPick(l, m) : api.show(l, m);
+
+    /* долгое нажатие на значок — подсказка словом (title на телефоне не виден); отпустил — нажатие не срабатывает */
+    let lp = 0, lpDone = false, tipT = 0;
+    const tip = $('.slv').appendChild(Object.assign(document.createElement('div'), { className: 'slv-tip hidden', role: 'tooltip' }));
+    function showTip(b) {
+      tip.textContent = b.dataset.tip; tip.classList.remove('hidden');
+      const r = b.getBoundingClientRect(), w = tip.offsetWidth;
+      tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+      tip.style.top = Math.max(8, r.top - tip.offsetHeight - 8) + 'px';
+      clearTimeout(tipT); tipT = setTimeout(() => tip.classList.add('hidden'), 1600);
+    }
+    art.addEventListener('pointerdown', e => {
+      const b = e.target.closest('[data-tip]'); lpDone = false; clearTimeout(lp);
+      if (b) lp = setTimeout(() => { lpDone = true; showTip(b); }, 450);
+    });
+    ['pointerup', 'pointercancel'].forEach(ev => art.addEventListener(ev, () => clearTimeout(lp)));  /* прокрутка пальцем — pointercancel */
+    art.addEventListener('contextmenu', e => { if (e.target.closest('[data-tip]')) e.preventDefault(); });
+
     art.addEventListener('click', e => {
+      if (lpDone && e.target.closest('[data-tip]')) { lpDone = false; return; }
       if (e.target.closest('.slv-back')) { opts.onBack ? opts.onBack() : api.show(null); return; }
       const lk = e.target.closest('.slv-link'); if (lk) { pick(lk.dataset.l); return; }
       if (e.target.closest('.slv-tbbtn')) { pick(cur, mode === 'tab' ? null : 'tab'); return; }  /* рубильник «таблицы / статья» */
-      if (!cur) return;
-      const s = D.S[D.by.get(cur)];
+      if (!cur || !curS) return;
+      const s = curS;
       const b = e.target.closest('.slv-say');
       if (b) { play(sayText(s.s), s.a && D.zvuk ? D.zvuk + s.a + '.mp4' : null, b); return; }
       const x = e.target.closest('.slv-exsay');
       if (x) { const ex = s.z[+x.dataset.z].ex[+x.dataset.x]; play(sayText(ex.el), ex.a && D.zvukP ? D.zvukP + ex.a + '.mp4' : null, x); }
     });
 
-    function article(l, m) {
-      const i = D.by.get(l); if (i === undefined) return false;
-      const s = D.S[i];
+    function article(l, m, s) {
+      curS = s;
       const tab = m === 'tab' && s.tb;
-      const tbBtn = s.tb ? (tab ? `<button class="slv-tbbtn on" aria-label="К статье">${ARTI}Статья</button>` : `<button class="slv-tbbtn" aria-label="${tbName(s)}">${TBI}${tbName(s)}</button>`) : '';
+      const tbBtn = s.tb ? (tab ? `<button class="slv-tbbtn on" aria-label="Статья" title="Статья" data-tip="Статья">${ARTI}</button>`
+        : `<button class="slv-tbbtn" aria-label="${tbName(s)}" title="${tbName(s)}" data-tip="${tbName(s)}">${TBI}</button>`) : '';
       let h = `<button class="slv-back">← ${q.value.trim() ? 'к списку' : 'к поиску'}</button>
         <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1>${tbBtn}<button class="slv-say" aria-label="Произнести">${SPK}</button></div>`;
       if (tab) {  /* таблицы — отдельным экраном той же статьи */
         mode = 'tab';
         const t = D.ptr.tablicyN ? tbSync(l) : null;
         art.innerHTML = h + (t === undefined ? '<p class="slv-tbwait">Загружаю таблицы…</p>' : t ? tbHtml(t) : '<p class="slv-tbwait">Таблицы для этого слова нет.</p>');
-        if (t === undefined) tablicy(l).then(() => cur === l && mode === 'tab' && article(l, m)).catch(e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = navigator.onLine ? e.message : 'Таблицы ещё не загружались на этот телефон — откройте один раз со связью.'; });
-        return true;
+        fitHead(art.querySelector('.slv-head'), art);
+        if (t === undefined) tablicy(l).then(() => cur === l && mode === 'tab' && article(l, m, s)).catch(e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = navigator.onLine ? e.message : 'Таблицы ещё не загружались на этот телефон — откройте один раз со связью.'; });
+        return;
       }
       mode = null;
       h += `
@@ -402,38 +505,45 @@
       if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${esc(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
       if (s.c && s.c.length && !s.tb) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
       art.innerHTML = h;
+      fitHead(art.querySelector('.slv-head'), art);  /* до отрисовки: страница ни на миг не шире экрана */
       requestAnimationFrame(() => fitMeta(art.querySelector('.slv-meta')));
-      const rec = (readJ(RECENT) || []).filter(x => x !== l); rec.unshift(l);
-      try { localStorage.setItem(RECENT, JSON.stringify(rec.slice(0, 30))); } catch (e) {}
-      return true;
+      const rec = (readJ(RECENT2) || []).filter(x => x.l !== l); rec.unshift({ l, s: s.s, b: brief(s.z.map(z => z.ru)) });
+      try { localStorage.setItem(RECENT2, JSON.stringify(rec.slice(0, 30))); } catch (e) {}
     }
 
     const api = {
       show(l, m) {  /* l — статья; null — список; m — 'tab': таблицы этой статьи */
         want = l; wantM = m || null;
-        if (!D) return;
-        const was = cur, y = window.scrollY;
-        cur = l && article(l, m) ? l : null;
-        if (cur && !was) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
-        art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
-        if (!cur) drawList();
-        if (cur) window.scrollTo(0, 0);
-        else if (was) {  /* назад к списку — на прежнее место; запрос в поле остаётся */
-          const y = listY; window.scrollTo(0, y);
-          requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));  /* браузер после popstate восстанавливает свою прокрутку — поверх неё */
-        }
-        /* список → список (повторный вызов маршрута) — прокрутку не трогаем */
+        const tok = ++showTok, was = cur, y = window.scrollY;
+        if (!D) { if (!l) drawList(); return; }  /* словарь ещё открывается: список «Недавних» уже виден, статья — когда готов */
+        const i = l ? by(l) : undefined;
+        const put = s => {
+          if (tok !== showTok) return;  /* пока разбиралась, открыли другое */
+          if (s) article(l, m, s);
+          cur = s ? l : null; if (!s) curS = null;
+          if (cur && !was) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
+          art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
+          if (!cur) drawList();
+          if (cur) { refit(); window.scrollTo(0, 0); }
+          else if (was) {  /* назад к списку — на прежнее место; запрос в поле остаётся */
+            const y = listY; window.scrollTo(0, y);
+            requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));  /* браузер после popstate восстанавливает свою прокрутку — поверх неё */
+          }
+          /* список → список (повторный вызов маршрута) — прокрутку не трогаем */
+        };
+        if (i === undefined) put(null);
+        else stat(i).then(put, e => { console.warn('slovar: статья', e); put(null); });
       },
-      focus() { if (D && !cur) q.focus({ preventScroll: true }); },
+      focus() { if (!cur) q.focus({ preventScroll: true }); },
       ready: null
     };
-    st.textContent = 'Загружаю словарь…';
-    const bar = $('.slv-bar');
+    drawList();
+    const bar = $('.slv-bar'), slow = setTimeout(() => { if (!D) st.textContent = 'Открываю словарь…'; }, 400);  /* из кэша — доли секунды, надпись не мелькает */
     api.ready = load(f => { bar.classList.remove('hidden'); bar.firstElementChild.style.width = Math.min(100, f * 100).toFixed(0) + '%'; st.textContent = `Загружаю словарь — один раз, дальше без сети · ${Math.min(99, Math.round(f * 100))} %`; })
-      .then(() => { bar.classList.add('hidden'); status(); if (q.value.trim()) run(); api.show(want, wantM); })
-      .catch(e => { bar.classList.add('hidden'); st.textContent = e.message || String(e); });
+      .then(() => { clearTimeout(slow); bar.classList.add('hidden'); status(); if (q.value.trim()) run(); api.show(want, wantM); })
+      .catch(e => { clearTimeout(slow); bar.classList.add('hidden'); st.textContent = e.message || String(e); });
     return api;
   }
 
-  window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; } };
+  window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer };
 })();
