@@ -306,6 +306,8 @@ $('setOpen').onclick = () => { push('settings'); show('settings'); };
 function renderSettings() {
   /* «Фраза на экране блокировки» — только в Android-приложении Экмафиси: сама функция и её настройки — там (android/) */
   try { $('setFraza').classList.toggle('hidden', localStorage.getItem('ekmafisi.android') !== '1'); } catch (e) {}
+  /* тема экрана фразы — как здесь: родной экран запоминает её и для ярлыка и уведомления */
+  $('setFrazaGo').href = `intent://fraza?tema=${['light', 'dark'].includes(G.theme) ? G.theme : 'auto'}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
   document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
   document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
   document.querySelectorAll('#setBtN button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.n === (G.btN || 3))));
