@@ -116,7 +116,7 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .ph .dot { margin-top: 8px; }
 .ph .el { font-size: calc(17px + var(--up)); }
 .ph.playing .el { color: var(--accent); }
-.ph .ru { grid-column: 2; font-size: calc(16px + var(--up)); color: var(--muted); }
+.ph .ru { grid-column: 2; font-size: calc(17px + var(--up)); color: var(--muted); }
 .dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line); }
 .dot.g { background: var(--g); border-color: var(--g); }
 .dot.y { background: var(--y); border-color: var(--y); }
@@ -128,8 +128,8 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 /* занятие */
 .big { font: 400 calc(26px + var(--up))/1.35 var(--f-el); min-height: 2.7em; }
 .w { cursor: pointer; border-bottom: 1px dotted var(--muted); }
-.ru-line { color: var(--muted); font-size: calc(22px + var(--up)); line-height: 1.35; }  /* перевод — почти кеглем оригинала (26) */
-.line .ru-line { font-size: calc(18px + var(--up)); }
+.ru-line { color: var(--muted); font-size: calc(26px + var(--up)); line-height: 1.35; }  /* перевод — кеглем оригинала (.big 26) */
+.line .ru-line { font-size: calc(19px + var(--up)); }  /* кеглем сверки (.cmp .el 19) */
 .hint { font-weight: 600; }
 .sub { color: var(--muted); font-size: calc(15px + var(--up)); margin-top: -12px; }  /* подпись режима под заголовком */
 .vh { visibility: hidden; }  /* скрытый греческий держит своё место: русский не прыгает */
@@ -168,7 +168,7 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .lines { display: grid; gap: 14px; }
 .line { display: grid; gap: 6px; }
 .line .el { font-size: calc(20px + var(--up)); }
-.line .ru { font-size: calc(19px + var(--up)); }  /* «Обратный перевод»: что сказать по-гречески */
+.line .ru { font-size: calc(20px + var(--up)); }  /* «Обратный перевод»: что сказать по-гречески */
 .line.playing .el { color: var(--accent); }
 textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(--f-el); border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--paper); color: var(--ink); resize: vertical; }
 .cmp { display: grid; gap: 4px; }
@@ -191,9 +191,9 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .ai { font-size: calc(11px + var(--up)); font-weight: 700; letter-spacing: .05em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; vertical-align: 1px; }
 .senses { margin: 0; padding-left: 22px; display: grid; gap: 6px; font-size: calc(14px + var(--up)); }
 .senses i { color: var(--muted); }
-.senses .ex { display: block; color: var(--muted); font-size: calc(13px + var(--up)); }
+.senses .ex { display: block; color: var(--muted); font-size: calc(14px + var(--up)); }
 .senses .ex .el { font-size: calc(14px + var(--up)); color: var(--ink); }
-.phr { display: grid; gap: 4px; font-size: calc(14px + var(--up)); }
+.phr { display: grid; gap: 4px; font-size: calc(15px + var(--up)); }
 .phr .el { font-size: calc(15px + var(--up)); }
 .sheet { position: fixed; inset: 0; z-index: 10; background: var(--paper); overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .sheet > div { max-width: 560px; margin: 0 auto; padding: 16px 16px 48px; display: grid; gap: 18px; }
