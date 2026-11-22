@@ -30,13 +30,13 @@ html, body { margin: 0; }
 html { overscroll-behavior-y: none; }  /* без «потяните вниз — обновить» (и в Chrome, и в TWA): новая версия — кнопкой внизу */
 body { background: var(--paper); color: var(--ink); font: calc(16px + var(--up))/1.5 var(--f-ui); -webkit-text-size-adjust: 100%; }
 main { max-width: 560px; margin: 0 auto; padding: calc(20px + env(safe-area-inset-top)) 16px calc(48px + env(safe-area-inset-bottom)); display: grid; gap: 20px; }
-/* верхняя строка на всех экранах: домик (на полку) · тема · настройки; прокрутка вниз — уезжает вверх, вверх — возвращается.
+/* верхняя строка на всех экранах (класс tbar: .top — уже строка карточки текста на полке): домик (на полку) · тема · настройки; прокрутка вниз — уезжает вверх, вверх — возвращается.
    Полоса под системной строкой (env(safe-area-inset-top)) остаётся цвета фона — текст под часы не заезжает */
-.top { position: fixed; top: 0; left: 0; right: 0; z-index: 5; background: var(--paper); padding: env(safe-area-inset-top) 8px 0; transition: transform .25s ease; }
-.top > div { max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 0 0 0; }
-.top .sp { flex: 1; }
-.top .icon { border: 0; background: none; padding: 10px; color: var(--muted); display: inline-flex; border-radius: 10px; }
-.top.away { transform: translateY(calc(env(safe-area-inset-top) - 100%)); }
+.tbar { position: fixed; top: 0; left: 0; right: 0; z-index: 5; background: var(--paper); padding: env(safe-area-inset-top) 8px 0; transition: transform .25s ease; }
+.tbar > div { max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 4px; height: 48px; }
+.tbar .sp { flex: 1; }
+.tbar .icon { border: 0; background: none; padding: 10px; color: var(--muted); display: inline-flex; border-radius: 10px; }
+.tbar.away { transform: translateY(calc(env(safe-area-inset-top) - 100%)); }
 body.has-top main:not(.gate) { padding-top: calc(52px + env(safe-area-inset-top)); }
 h1, h2 { text-wrap: balance; margin: 0; }
 h1 { font: 600 calc(30px + var(--up))/1.15 var(--f-el); }
@@ -278,7 +278,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 </head>
 <body>
 
-<header class="top hidden" id="top"><div>
+<header class="tbar hidden" id="top"><div>
   <button class="icon" id="goHome" aria-label="На полку"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h5v-6h4v6h5V9"/></svg></button>
   <span class="sp"></span>
   <button class="icon" id="theme" aria-label="Тема"></button>
