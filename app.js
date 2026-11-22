@@ -2,7 +2,7 @@
    EK.lib — тексты, EK.uid — кто вошёл, EK.content(путь) — файл из закрытого хранилища (с кэшем), EK.queue* — отправка. */
 const LIB = EK.lib;
 const LEVELS = { A1: 1, A2: 2, B1: 3, B2: 4 };
-const MODE_NAME = { skor: 'Повторение', bt: 'Обратный перевод', soberi: 'Собери' };  /* ключ skor — прежнее имя «Скороговорки»: так в настройках и адресах */
+const MODE_NAME = { skor: 'Повторение', bt: 'Обратный перевод', ves: 'Весь текст', soberi: 'Собери' };  /* ключ skor — прежнее имя «Скороговорки»: так в настройках и адресах */
 /* язык материала: текст фразы — поле t (прежние греческие материалы — el), порядок форм глагола и надписи — по языку */
 const LANGS = {
   el: { name: 'греческий', chip: 'ΕΛ', say: 'по-гречески', to: 'на греческий', forms: ['present', 'imperfect', 'aorist', 'future'] },
@@ -217,9 +217,10 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
-  ['shelf', 'settings', 'home', 'skor', 'bt', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
-  window.scrollTo(0, 0);
-  if (id === 'shelf') { if (window.EK_UPDATE) return location.reload(); renderShelf(); }
+  ['shelf', 'settings', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
+  $('goHome').style.visibility = id === 'shelf' ? 'hidden' : '';  /* на полке домик не нужен — место держит */
+  if (id === 'shelf') renderShelf();
   if (id === 'home') renderHome();
   if (id === 'settings') renderSettings();
   if (id === 'words') renderWords();
@@ -228,7 +229,7 @@ const shown = id => !$(id).classList.contains('hidden');
 
 /* --- переходы: каждый экран и окно — шаг в истории браузера, системное «назад» и «←» идут на шаг выше:
    полка ← текст (#id) ← режим (#id-skor, #id-bt) ← окно слова (значения, происхождение, история) */
-const MODES = ['skor', 'bt'];
+const MODES = ['skor', 'bt', 'ves'];
 const urlOf = h => h ? '#' + h : location.pathname + location.search;
 const depth = () => (history.state && history.state.d) || 0;
 const curHash = () => location.hash.slice(1);
@@ -256,7 +257,7 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
   else {
     const fresh = !M || M.id !== t.id;
     if (fresh) setText(t.id);
-    if (force || fresh || !shown(t.v)) t.v === 'home' ? show('home') : t.v === 'bt' ? btOpenAt(btPos()) : skorOpen(S.skorAt);
+    if (force || fresh || !shown(t.v)) t.v === 'home' ? show('home') : t.v === 'bt' ? btOpenAt(btPos()) : t.v === 'ves' ? vesOpen() : skorOpen(S.skorAt);
   }
   sh ? openSheet(sh) : closeSheet();
 }
@@ -272,8 +273,8 @@ function renderShelf() {
     const done = c.g + c.y + c.r;
     return `<button class="text${lastId() === m.id ? ' last' : ''}" data-id="${m.id}">
       <span class="top"><span class="row" style="gap:6px"><span class="chip lang" title="${esc(LG(m).name)}">${esc(LG(m).chip)}</span><span class="chip">${esc(m.level)}</span></span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')}</span></span>
-      <span class="t">${esc(m.title)}</span>
-      <span class="tel">${esc(TTL(m))}</span>
+      <span class="t">${esc(TTL(m))}</span>
+      <span class="tru">${esc(m.title)}</span>
       <span class="meta2">${esc(AUTHOR(m))}, «${esc(m.source.channel)}»</span>
       ${done ? squaresHtml(c, n) : ''}
       <span class="tally" aria-hidden="true">${tallyHtml(c, n)}</span>
@@ -297,7 +298,7 @@ function renderShelf() {
   const sbLast = sbOn && G.mode === 'soberi';
   $('resume').classList.toggle('hidden', !last && !sbLast);
   if (sbLast) $('resume').innerHTML = `<span>Продолжить · Собери</span><small>ступень ${esc(SB.step)} — ${esc(ladderOf(SB.step).t)}</small>`;
-  else if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(last.title)}</small>`;
+  else if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(TTL(last))}</small>`;
 }
 $('resume').onclick = () => { if (G.lang === 'el' && G.mode === 'soberi') { push('soberi'); push('sbgo'); sbGo(SB.step); return; } openText(lastId()); start(G.mode); };
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
@@ -338,27 +339,51 @@ function openText(id) { setText(id); push(id); show('home'); }
 /* --- текст --- */
 function renderHome() {
   const c = counts(M, S.colors), n = P.length;
-  $('hSrc').textContent = `${LG(M).name} · ${M.level} · ${AUTHOR(M)}, «${M.source.channel}»`;
-  $('hTitle').textContent = M.title; $('hTitleEl').textContent = TTL(M);
+  $('hSrc').textContent = `${M.level} · ${AUTHOR(M)}, «${M.source.channel}»`;  /* без языка — в одну строку; язык и так один на полке */
+  $('hTitle').textContent = TTL(M); $('hTitleRu').textContent = M.title;  /* оригинал крупно, перевод мелко */
   $('ytLink').classList.toggle('hidden', !M.source.url); if (M.source.url) $('ytLink').href = M.source.url;
   $('stat').innerHTML = `${n} ${plural(n, 'фраза', 'фразы', 'фраз')}` + squaresHtml(c, n);
   $('tally').innerHTML = tallyHtml(c, n);
-  $('run').textContent = 'Запустить · ' + MODE_NAME[G.mode];
+  paintFold(); paintSpeed();
   $('btSub').textContent = `Переведите фразу ${LG(M).to}, не глядя на оригинал.`;
-  $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="dot ${S.colors[p.id] || ''}"></span><span class="el">${esc(TX(p))}</span><span class="ru">${esc(p.ru)}</span></button>${lrnBtn('ph-lrn', i)}<button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
+  /* точка — только «трудно» и «не знаю»; зелёное показывает шапочка */
+  const dot = c => c === 'y' || c === 'r' ? `<span class="dot ${c}" aria-label="${c === 'y' ? 'трудно' : 'не знаю'}"></span>` : '';
+  $('list').innerHTML = P.map((p, i) => `<div class="ph" data-i="${i}"><button class="ph-play"><span class="el">${esc(TX(p))}</span><span class="ru">${esc(p.ru)}</span></button><span class="ph-mk">${dot(S.colors[p.id])}${lrnBtn('ph-lrn', i)}</span><button class="ph-go" aria-label="Учить с этой фразы">›</button></div>`).join('');
   document.querySelectorAll('#list .ph').forEach(r => {
     const i = +r.dataset.i;
     r.querySelector('.ph-play').onclick = () => toggle(r, () => { playBy(r, i, G.rate, () => r.classList.remove('playing')); r.classList.add('playing'); });
-    r.querySelector('.ph-go').onclick = () => start(G.mode, i);  /* любая фраза, не по очереди; «Обратный перевод» — с куска, где она есть */
+    r.querySelector('.ph-go').onclick = () => start(G.mode === 'bt' ? 'bt' : 'skor', i);  /* любая фраза, не по очереди; «Обратный перевод» — с куска, где она есть */
   });
 }
-document.querySelectorAll('.mode').forEach(b => b.onclick = () => start(b.dataset.mode));
-$('run').onclick = () => start(G.mode);
+/* «Фразы» свёрнуты или развёрнуты — как оставили (на этом устройстве, для всех текстов) */
+const FOLD = 'ekmafisi-phrases';
+const foldOpen = () => { try { return localStorage.getItem(FOLD) === '1'; } catch (e) { return false; } };
+function paintFold() { const on = foldOpen(); $('phFold').setAttribute('aria-expanded', String(on)); $('phBody').classList.toggle('hidden', !on); }
+$('phFold').onclick = () => { try { localStorage.setItem(FOLD, foldOpen() ? '0' : '1'); } catch (e) {} paintFold(); };
+document.querySelectorAll('.mode[data-mode]').forEach(b => b.onclick = () => start(b.dataset.mode));
 function start(mode, i) {  /* i — с какой фразы; без него — с того места, где остановились */
   G.mode = mode; saveG(); push(M.id + '-' + mode);
   if (mode === 'bt') btOpenAt(i === undefined ? btPos() : i, i !== undefined);
+  else if (mode === 'ves') vesOpen();
   else skorOpen(i === undefined ? S.skorAt : i);
 }
+
+/* --- Весь текст: абзацы по смыслу (chunks), без перевода; ▶ — весь текст подряд, звучащее предложение подсвечено;
+   нажатие на предложение — его звук (Ваш выбор, 22.11.2026) --- */
+function vesOpen() {
+  show('ves');
+  $('vText').innerHTML = CHUNKS.map(ch => `<p>${ch.map(i => `<span class="vs" data-i="${i}">${esc(TX(P[i]))}</span>`).join(' ')}</p>`).join('');
+  $('vText').lang = M.lang || 'el';
+  $('vText').querySelectorAll('.vs').forEach(e => e.onclick = () => {
+    const i = +e.dataset.i;
+    toggle(e, () => { playBy(e, i, G.rate, () => e.classList.remove('playing')); e.classList.add('playing'); });
+  });
+  paintSpeed(); paintOwner();
+}
+$('vPlay').onclick = () => toggle($('vPlay'), () => playSeq($('vPlay'), P.map((p, i) => i), G.rate, i => {
+  const e = document.querySelector(`#vText .vs[data-i="${i}"]`);
+  if (e) { e.classList.add('playing'); e.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+}));
 
 $('copy').onclick = () => {
   const lines = [`Экмафиси · ${new Date().toISOString().slice(0, 10)} · скорость: ${RATE_LBL(G.rate)}`];
@@ -409,9 +434,14 @@ function noteOf(w, L) {
 }
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
 const formsOf = (L, D) => L.forms ? LG(M).forms.map(k => (L.forms[k] || '—').replace(/ /g, '\u00a0')).join(' · ') : (D && D.dict.forms) || '';
-function glossHtml(w) {
-  const L = M.lexicon[w.l] || {}, D = LEX[w.l];
-  let h = `<div>${esc(cap(L.ru || (D && D.dict.senses[0] && D.dict.senses[0].ru) || ''))}</div>`;
+/* выражение (idioms материала), куда входит слово k фразы p: at — [фраза, с, по] включительно, номера в p.words от 0 */
+const idiomOf = (p, k) => (M.idioms || []).find(d => (d.at || []).some(([pid, a, b]) => pid === p.id && k >= a && k <= b)) || null;
+const idiomRange = (p, d) => d.at.find(([pid]) => pid === p.id).slice(1);
+function glossHtml(w, p, k) {
+  const L = M.lexicon[w.l] || {}, D = LEX[w.l], d = p && idiomOf(p, k);
+  /* нажатое слово внутри выражения — выражение целиком над статьёй слова */
+  let h = d ? `<div class="idm"><div><span class="el">${esc(d.t)}</span> — ${esc(d.ru)}</div>${d.note ? `<div class="small muted">${esc(cap(d.note))}</div>` : ''}</div>` : '';
+  h += `<div>${esc(cap(L.ru || (D && D.dict.senses[0] && D.dict.senses[0].ru) || ''))}</div>`;
   const g = noteOf(w, L);
   if (g) h += `<div class="small muted">${esc(cap(g))}</div>`;
   /* формы строкой, без названий времён: el — настоящее · παρατατικός · аорист · будущее; en — base · past · participle, только у неправильных */
@@ -425,7 +455,12 @@ function glossHtml(w) {
   return h;
 }
 /* нажатое слово подсвечено в предложении, пока открыта его карточка */
-function pickWord(scope, el) { scope.querySelectorAll('.w.sel').forEach(x => x.classList.remove('sel')); el.classList.add('sel'); }
+function pickWord(scope, el, p) {
+  scope.querySelectorAll('.w.sel').forEach(x => x.classList.remove('sel')); el.classList.add('sel');
+  const d = p && idiomOf(p, +el.dataset.k); if (!d) return;  /* слово выражения — подсвечено всё выражение */
+  const [a, b] = idiomRange(p, d), box = el.closest('.el') || scope;
+  box.querySelectorAll('.w').forEach(x => { if (+x.dataset.k >= a && +x.dataset.k <= b) x.classList.add('sel'); });
+}
 function sensesHtml(d) {
   let h = '<ol class="senses">' + d.senses.map(s => `<li>${s.label ? `<i>${esc(s.label)}</i> ` : ''}${esc(s.ru)}${s.ex.map(x => `<span class="ex"><span class="el">${esc(x.el)}</span> — ${esc(x.ru)}</span>`).join('')}</li>`).join('') + '</ol>';
   if (d.phrases.length) h += '<div class="phr"><span class="small muted">Выражения</span>' + d.phrases.map(x => `<div><span class="el">${esc(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
@@ -609,12 +644,36 @@ function skorRender() {
   $('sLrn').dataset.lrn = sk.i; paintLrn();
   document.querySelectorAll('#sText .w').forEach(e => e.onclick = () => {
     if (sk.hide) return;
-    const g = $('sGloss'); g.innerHTML = glossHtml(p.words[+e.dataset.k]); g.classList.remove('hidden'); pickWord($('sText'), e);
+    const g = $('sGloss'); g.innerHTML = glossHtml(p.words[+e.dataset.k], p, +e.dataset.k); g.classList.remove('hidden'); pickWord($('sText'), e, p);
   });
   paintSpeed(); paintOwner();
   /* звук — только по «▶»: автозапуска нет (Ваше слово, 5 ноября 2026) */
 }
 $('sPlay').onclick = () => toggle($('sPlay'), () => playBy($('sPlay'), sk.i, G.rate));
+/* свайп влево — следующая карточка, вправо — предыдущая; с последней — к первой и наоборот (по кругу).
+   Отметки «пройдено» свайп не ставит — это ✓; «выучено» пропускаются, как и при ✓ */
+function onSwipe(el, fn) {
+  let st = null;
+  el.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    st = e.touches.length === 1 && !e.target.closest('textarea, input') && t.clientX > 20 && t.clientX < innerWidth - 20 ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
+  }, { passive: true });
+  el.addEventListener('touchend', e => {
+    if (!st) return; const t = e.changedTouches[0], dx = t.clientX - st.x, dy = t.clientY - st.y, ok = Date.now() - st.t < 800; st = null;
+    if (ok && Math.abs(dx) > 60 && Math.abs(dx) > 1.5 * Math.abs(dy)) fn(dx < 0 ? 1 : -1);
+  }, { passive: true });
+}
+const slideIn = (el, d) => { el.classList.remove('sw-n', 'sw-p'); void el.offsetWidth; el.classList.add(d > 0 ? 'sw-n' : 'sw-p'); };
+onSwipe($('skor'), d => {
+  stop(); sk.i = nextIdx(sk.i, d); S.skorAt = sk.i; save();
+  skorRender(); slideIn(document.querySelector('#skor .pcard'), d);
+});
+onSwipe($('bt'), d => {
+  const K = btPieces(); let c = bt.c;
+  for (let k = 0; k < K.length; k++) { c = (c + d + K.length) % K.length; if (!K[c].every(i => skipped(S, P[i].id))) break; }
+  S.btI = K[c][0]; S.btAt = Math.max(0, CHUNKS.findIndex(ch => ch.includes(S.btI))); save();
+  btOpen(c, true); slideIn(document.querySelector('#bt .card'), d);
+});
 $('sEye').onclick = () => { sk.hide = !sk.hide; $('sText').classList.toggle('vh', sk.hide); paintEye($('sEye'), sk.hide, 'текст'); if (sk.hide) $('sGloss').classList.add('hidden'); };
 $('sDone').onclick = () => {
   stop(); passed(sk.i);
@@ -695,7 +754,7 @@ function btRender(keep) {  /* keep — что оставить в полях п�
     const el = slot.querySelector('.el:not(.you)');
     if (el) el.onclick = ev => {
       const w = ev.target.closest('.w');
-      if (w) { const g = l.querySelector('.gloss'); g.innerHTML = glossHtml(p.words[+w.dataset.k]); g.classList.remove('hidden'); pickWord($('bLines'), w); return; }
+      if (w) { const g = l.querySelector('.gloss'); g.innerHTML = glossHtml(p.words[+w.dataset.k], p, +w.dataset.k); g.classList.remove('hidden'); pickWord($('bLines'), w, p); return; }
       toggle(l, () => { playBy(l, i, G.rate, () => l.classList.remove('playing')); l.classList.add('playing'); });
     };
   });
@@ -1287,6 +1346,9 @@ function paintTheme() {
     dark: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
   }[t]);
   $('theme').setAttribute('aria-label', 'Тема: ' + THEMES[t]);
+  /* строка состояния (Chrome, установленная PWA) — цвета фона выбранной темы, а не только системной */
+  const paper = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim();
+  document.querySelectorAll('meta[name="theme-color"]').forEach(x => { x.content = paper; x.removeAttribute('media'); });
   if (shown('settings')) renderSettings();
 }
 $('theme').onclick = () => { const k = Object.keys(THEMES); G.theme = k[(k.indexOf(G.theme) + 1) % k.length]; saveG(); paintTheme(); };
@@ -1346,6 +1408,18 @@ $('acctWho').textContent = EK.email || '';
 $('signOut').onclick = () => EK.signOut();
 EK.onStatus(EK.status || (navigator.onLine ? '' : 'offline'));
 
+/* --- верхняя строка: на всех экранах; прокрутка вниз — уезжает, вверх — возвращается --- */
+let topY = 0;
+$('top').classList.remove('hidden'); document.body.classList.add('has-top');
+addEventListener('scroll', () => {
+  const y = scrollY, d = y - topY;
+  if (Math.abs(d) < 8 && y > 0) return;  /* дрожь пальца — не в счёт */
+  $('top').classList.toggle('away', d > 0 && y > 60);
+  topY = y;
+}, { passive: true });
+/* домик — на полку: шаги истории назад до неё (системное «назад» потом не вернёт в занятие) */
+$('goHome').onclick = () => { const n = depth(); if (n > 0) history.go(-n); else { history.replaceState({ d: 0, sheet: null }, '', urlOf('')); applyLoc(); } };
+
 /* --- вход: ссылка прямо на текст или режим (#id, #id-skor) — достраиваем шаги назад: полка ← текст ← режим --- */
 if (!history.state || history.state.d === undefined) {
   const t = parseHash(curHash());
@@ -1356,8 +1430,3 @@ if (!history.state || history.state.d === undefined) {
 applyLoc(true);
 EK.sync();  /* подтянуть с сервера то, что изменилось на других устройствах */
 
-/* --- новая версия оболочки встала: на полке — перезапуск сразу, в занятии — полоска; вернулся на полку — перезапуск --- */
-window.EK_APP = true;
-const updNow = () => { if (shown('shelf') && !sheetNow) location.reload(); else $('upd').classList.remove('hidden'); };
-window.addEventListener('ekmafisi-update', updNow);
-if (window.EK_UPDATE) updNow();

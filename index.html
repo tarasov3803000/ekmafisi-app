@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="google" content="notranslate">  <!-- без «Перевести страницу?» от Chrome -->
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">  <!-- край в край: отступы — env(safe-area-inset-*) -->
 <title>Экмафиси</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32">
@@ -27,8 +27,17 @@ try { const u = localStorage.getItem('ekmafisi-up') ?? (localStorage.getItem('ek
 /* Экмафиси (PWA, выросла из пробной страницы): один столбец под телефон; полка текстов → текст → режим. Греческий — книжным шрифтом крупно, остальное тихо. */
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+html { overscroll-behavior-y: none; }  /* без «потяните вниз — обновить» (и в Chrome, и в TWA): новая версия — кнопкой внизу */
 body { background: var(--paper); color: var(--ink); font: calc(16px + var(--up))/1.5 var(--f-ui); -webkit-text-size-adjust: 100%; }
-main { max-width: 560px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 20px; }
+main { max-width: 560px; margin: 0 auto; padding: calc(20px + env(safe-area-inset-top)) 16px calc(48px + env(safe-area-inset-bottom)); display: grid; gap: 20px; }
+/* верхняя строка на всех экранах: домик (на полку) · тема · настройки; прокрутка вниз — уезжает вверх, вверх — возвращается.
+   Полоса под системной строкой (env(safe-area-inset-top)) остаётся цвета фона — текст под часы не заезжает */
+.top { position: fixed; top: 0; left: 0; right: 0; z-index: 5; background: var(--paper); padding: env(safe-area-inset-top) 8px 0; transition: transform .25s ease; }
+.top > div { max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 0 0 0; }
+.top .sp { flex: 1; }
+.top .icon { border: 0; background: none; padding: 10px; color: var(--muted); display: inline-flex; border-radius: 10px; }
+.top.away { transform: translateY(calc(env(safe-area-inset-top) - 100%)); }
+body.has-top main:not(.gate) { padding-top: calc(52px + env(safe-area-inset-top)); }
 h1, h2 { text-wrap: balance; margin: 0; }
 h1 { font: 600 calc(30px + var(--up))/1.15 var(--f-el); }
 h2 { font-size: calc(13px + var(--up)); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
@@ -66,7 +75,7 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .text { text-align: left; display: grid; gap: 8px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
 .text .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .text .t { font: 600 calc(21px + var(--up))/1.2 var(--f-el); text-wrap: balance; }
-.text .tel { font-family: var(--f-el); color: var(--muted); }
+.text .tru { font-size: calc(15px + var(--up)); color: var(--muted); margin-top: -4px; }  /* перевод названия — мелко под оригиналом */
 .text .meta2 { font-size: calc(13px + var(--up)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .text.last { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
 .resume { display: grid; gap: 2px; text-align: left; }
@@ -102,25 +111,46 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .meta { display: grid; gap: 6px; }
 .bar { display: flex; align-items: center; gap: 12px; }
 .bar .ttl { font-weight: 700; flex: 1; }
+.src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* «A1 · автор, «канал»» — в одну строку */
+.ttl-ru { color: var(--muted); font-size: calc(16px + var(--up)); margin-top: -2px; }
 .bar .cnt { color: var(--muted); font-variant-numeric: tabular-nums; }
 .modes { display: grid; gap: 12px; }
 .mode { text-align: left; display: grid; gap: 4px; border: 0; padding: 0; background: none; }
 .mode b { font-size: calc(18px + var(--up)); }
 .list { display: grid; gap: 0; }
-.ph { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
+/* строка фразы: текст на всю ширину, значки справа: шапочка (с точкой на углу) и › — точка только жёлтая/красная (зелёное — шапочка) */
+.ph { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
 .ph:last-child { border-bottom: 0; }
-.ph-play { flex: 1; display: grid; grid-template-columns: 14px 1fr; gap: 4px 12px; padding: 10px 0; border: 0; text-align: left; background: none; }
-.ph-lrn { border: 0; background: none; color: var(--line); padding: 0 0 0 10px; display: inline-grid; place-items: center; }
+.ph-play { flex: 1; min-width: 0; display: grid; gap: 4px; padding: 10px 0; border: 0; text-align: left; background: none; }
+.ph-mk { flex: none; display: flex; align-items: center; margin-left: 6px; position: relative; }
+.ph-lrn { border: 0; background: none; color: var(--line); padding: 0; width: calc(36px + 2 * var(--up)); height: calc(40px + 2 * var(--up)); display: inline-grid; place-items: center; }
+.ph-lrn svg { width: 24px; height: 24px; }
 .ph-lrn[aria-pressed="true"] { color: var(--g); }
-.ph-go { border: 0; background: none; color: var(--muted); font-size: calc(24px + var(--up)); padding: 0 2px 0 14px; }  /* «›» — учить с этой фразы */
-.ph .dot { margin-top: 8px; }
+.ph-go { border: 0; background: none; color: var(--muted); font-size: calc(24px + var(--up)); padding: 0 2px 0 4px; min-height: 40px; }  /* «›» — учить с этой фразы */
+/* точка — на углу шапочки (выбрано по снимку 22.11: ряд «точка · шапочка ›» шире и рыхлее, тексту теснее) */
+.ph-mk .dot { position: absolute; top: calc(6px + var(--up) / 2); right: 4px; width: 9px; height: 9px; box-shadow: 0 0 0 2px var(--card); pointer-events: none; }
 .ph .el { font-size: calc(17px + var(--up)); }
 .ph.playing .el { color: var(--accent); }
-.ph .ru { grid-column: 2; font-size: calc(17px + var(--up)); color: var(--muted); }
+.ph .ru { font-size: calc(17px + var(--up)); color: var(--muted); }
 .dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line); }
 .dot.g { background: var(--g); border-color: var(--g); }
 .dot.y { background: var(--y); border-color: var(--y); }
 .dot.r { background: var(--r); border-color: var(--r); }
+/* «Фразы» — сворачиваемый подблок, как карточка режима */
+.fold { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px; }
+.fold .chev { grid-row: 1 / span 2; grid-column: 2; color: var(--muted); transition: transform .2s; }
+.fold[aria-expanded="true"] .chev { transform: rotate(180deg); }
+/* «Весь текст»: абзацы по смыслу (chunks), без перевода; нажатие на предложение — его звук */
+.vtext { display: grid; gap: 14px; font: 400 calc(21px + var(--up))/1.6 var(--f-el); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.vs { cursor: pointer; border-radius: 4px; transition: background .15s, color .15s; }
+.vs.playing { color: var(--accent); background: var(--accent-soft); }
+.ctl.c3 { max-width: 230px; }
+.howto summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.howto summary::-webkit-details-marker { display: none; }
+.howto[open] summary .chev { transform: rotate(180deg); }
+.howto .chev { color: var(--muted); transition: transform .2s; }
+.howto ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.howto > div { display: grid; gap: 8px; margin-top: 12px; font-size: calc(15px + var(--up)); }
 .links { display: flex; gap: 16px; flex-wrap: wrap; font-size: calc(14px + var(--up)); }
 .links button, .links a { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
 .loading { font-size: calc(13px + var(--up)); color: var(--muted); }
@@ -135,10 +165,18 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .vh { visibility: hidden; }  /* скрытый греческий держит своё место: русский не прыгает */
 .pcard { position: relative; }
 /* значки растут вместе с кеглем (+2 px на ступень при +1 px у текста): места друг относительно друга не меняются */
-.lrn { position: absolute; top: 6px; right: 6px; width: calc(40px + 2 * var(--up)); height: calc(40px + 2 * var(--up)); border: 0; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; border-radius: 10px; }
+.lrn { width: calc(44px + 2 * var(--up)); height: calc(44px + 2 * var(--up)); border: 0; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; border-radius: 10px; }
 .lrn svg { width: 65%; height: 65%; }
 .lrn[aria-pressed="true"] { color: var(--g); }
-.pcard > #sText, .pcard > #sRu { margin-right: calc(34px + 2 * var(--up)); }  /* «Повторение»: место под «выучено» — текст под значок не заходит */
+.lrn-row { display: flex; justify-content: center; margin-top: -10px; }  /* «Повторение»: «выучено» — под кнопкой звука, по центру; текст карточки — на всю ширину */
+/* свайп к соседней карточке: карточка въезжает с той стороны, куда листали */
+#skor, #bt { touch-action: pan-y; }
+@media (prefers-reduced-motion: no-preference) { .sw-n { animation: swn .22s ease-out; } .sw-p { animation: swp .22s ease-out; } }
+@keyframes swn { from { transform: translateX(32px); opacity: .3; } }
+@keyframes swp { from { transform: translateX(-32px); opacity: .3; } }
+/* выражение целиком (idioms) — над статьёй нажатого слова */
+.idm { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.idm .el { font-weight: 600; }
 /* «Обратный перевод»: строка — сетка; справа свой столбец: выучено · трудно · не знаю · глаз */
 .line.has-mk { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: start; }
 .line.has-mk > .slot { grid-column: 1; grid-row: 1; }
@@ -196,7 +234,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .phr { display: grid; gap: 4px; font-size: calc(15px + var(--up)); }
 .phr .el { font-size: calc(15px + var(--up)); }
 .sheet { position: fixed; inset: 0; z-index: 10; background: var(--paper); overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.sheet > div { max-width: 560px; margin: 0 auto; padding: 16px 16px 48px; display: grid; gap: 18px; }
+.sheet > div { max-width: 560px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px calc(48px + env(safe-area-inset-bottom)); display: grid; gap: 18px; }
 .sheet .icon { border: 0; background: none; padding: 8px; color: var(--muted); display: inline-flex; }
 .e-head { display: grid; gap: 4px; }
 .e-head .lem { font: 600 calc(34px + var(--up))/1.1 var(--f-el); }
@@ -214,8 +252,6 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .gate .brand { justify-content: center; }
 .gate p { max-width: 22em; }
 .err { color: var(--r); font-size: calc(14px + var(--up)); }
-.topbar { display: flex; justify-content: flex-end; gap: 4px; margin: -8px -8px -8px 0; }
-.topbar .icon { border: 0; background: none; padding: 8px; color: var(--muted); display: inline-flex; border-radius: 10px; }
 .acct { font-size: calc(13px + var(--up)); color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
 .acct button { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-size: calc(13px + var(--up)); font-weight: 600; }
 /* ряд кнопок занятия — все одного размера: ✓ · < · ▶ со скоростью внутри · > · глаз («Обратный перевод» — без ✓) */
@@ -236,11 +272,18 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .sw i { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .15s; }
 .sw[aria-checked="true"] { background: var(--accent); }
 .sw[aria-checked="true"] i { left: 23px; }
-.upd { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20; border: 0; border-radius: 999px; padding: 10px 18px; background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+.upd { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 20; border: 0; border-radius: 999px; padding: 10px 18px; background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 @media (prefers-reduced-motion: no-preference) { .btn, .text { transition: transform .08s; } .btn:active, .text:active { transform: scale(.985); } }
 </style>
 </head>
 <body>
+
+<header class="top hidden" id="top"><div>
+  <button class="icon" id="goHome" aria-label="На полку"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h5v-6h4v6h5V9"/></svg></button>
+  <span class="sp"></span>
+  <button class="icon" id="theme" aria-label="Тема"></button>
+  <button class="icon" id="setOpen" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+</div></header>
 
 <main id="login" class="gate hidden">
   <div class="brand"><b>Экмафиси</b></div>
@@ -256,10 +299,6 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 </main>
 
 <main id="shelf" class="hidden">
-  <div class="topbar">
-    <button class="icon" id="theme" aria-label="Тема"></button>
-    <button class="icon" id="setOpen" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
-  </div>
   <section id="langPick" class="card hidden">
     <h2>Что учите</h2>
     <div class="row"><button class="btn" data-lang="el" style="flex:1">Греческий</button><button class="btn" data-lang="en" style="flex:1">Английский</button></div>
@@ -281,6 +320,19 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 
 <main id="settings" class="hidden">
   <div class="bar"><span class="ttl">Настройки</span></div>
+  <details class="card howto" id="howto">
+    <summary><h2>Как пользоваться</h2><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <div>
+      <p>Каждый текст учится тремя способами — любым, в каком хочется порядке:</p>
+      <ul>
+        <li><b>Повторение</b> — слушайте фразу и повторяйте вслух, пока она не начнёт говориться сама.</li>
+        <li><b>Обратный перевод</b> — по русскому напишите фразу на языке и сверьте с оригиналом.</li>
+        <li><b>Весь текст</b> — прочитайте и послушайте целиком, выучите наизусть.</li>
+      </ul>
+      <p>Цвет фразы ставите сами: шапочка — «уже знаю», в обратном переводе — «трудно» и «не знаю».</p>
+      <p>Новый текст — только когда сами его откроете. Слово: нажать — перевод, подержать — происхождение. Карточки листаются свайпом влево и вправо.</p>
+    </div>
+  </details>
   <section class="card">
     <h2>Учу</h2>
     <div class="seg" id="setLang" role="group" aria-label="Язык обучения"><button data-lang="el">греческий</button><button data-lang="en">английский</button></div>
@@ -320,14 +372,13 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 
 <main id="home" class="hidden">
   <div class="meta">
-    <p class="small muted" id="hSrc"></p>
+    <p class="small muted src" id="hSrc"></p>
     <h1 id="hTitle"></h1>
-    <p class="el muted" id="hTitleEl"></p>
+    <p class="ttl-ru" id="hTitleRu"></p>
     <p class="small muted" id="stat"></p>
     <div class="tally" id="tally" aria-hidden="true"></div>
   </div>
 
-  <button class="btn primary wide" id="run" style="min-height:56px;font-size:calc(18px + var(--up))">Запустить</button>
   <p class="loading hidden" id="loading">Загружаю звук…</p>
 
   <div class="modes">
@@ -343,12 +394,23 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
         <span class="small muted" id="btSub">Переведите фразу на греческий, не глядя на оригинал.</span>
       </button>
     </div>
+    <div class="card">
+      <button class="mode" data-mode="ves">
+        <b>Весь текст</b>
+        <span class="small muted">Прочитайте целиком и выучите наизусть.</span>
+      </button>
+    </div>
+    <section class="card">
+      <button class="mode fold" id="phFold" aria-expanded="false" aria-controls="phBody">
+        <b>Фразы</b><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        <span class="small muted">Нажмите — послушать, › — учить с неё.</span>
+      </button>
+      <div id="phBody" class="hidden" style="display:grid;gap:8px">
+        <div class="spd speed" id="hSpeed" role="group" aria-label="Скорость" style="justify-content:flex-end"></div>
+        <div class="list" id="list"></div>
+      </div>
+    </section>
   </div>
-
-  <section class="card">
-    <div class="row" style="justify-content:space-between"><h2>Фразы · нажмите — послушать, › — учить с неё</h2><div class="spd speed" id="hSpeed" role="group" aria-label="Скорость"></div></div>
-    <div class="list" id="list"></div>
-  </section>
 
   <div class="links">
     <a id="ytLink" href="#" target="_blank" rel="noopener">Ролик на YouTube</a>
@@ -359,9 +421,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 
 <main id="skor" class="hidden">
   <div class="bar"><span class="ttl">Повторение</span><span class="cnt" id="sCnt"></span></div>
-  <p class="sub">Повторите фразу многократно до автоматического запоминания</p>
   <div class="card pcard">
-    <button class="lrn" id="sLrn" aria-pressed="false" aria-label="Выучено"></button>
     <div id="sText" class="big el"></div>
     <p id="sRu" class="ru-line"></p>
     <div id="sGloss" class="gloss hidden"></div>
@@ -373,6 +433,17 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <button class="ic faster" aria-label="Быстрее"></button>
     <button class="ic eye" id="sEye" aria-pressed="false" aria-label="Скрыть текст"></button>
   </div>
+  <div class="lrn-row"><button class="lrn" id="sLrn" aria-pressed="false" aria-label="Выучено"></button></div>
+</main>
+
+<main id="ves" class="hidden">
+  <div class="bar"><span class="ttl">Весь текст</span></div>
+  <div class="ctl c3">
+    <button class="ic slower" aria-label="Медленнее"></button>
+    <button class="ic play" id="vPlay" aria-label="Слушать весь текст"></button>
+    <button class="ic faster" aria-label="Быстрее"></button>
+  </div>
+  <div class="vtext" id="vText"></div>
 </main>
 
 <main id="bt" class="hidden">
@@ -470,8 +541,8 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 <button id="upd" class="upd hidden">Новая версия — обновить</button>
 <script>
 /* обновление по воздуху: новая оболочка скачивается сама (при открытии, уходя, возвращаясь и раз в полчаса);
-   встала — на полке или экране входа страница перезапускается сама, посреди занятия — полоска «Новая версия — обновить».
-   Встала, пока приложение было свёрнуто, — при возврате то же самое, без второго запуска (решение 18.11.2026) */
+   встала — внизу на любом экране кнопка «Новая версия — обновить», страница сама не перезапускается (решение 22.11.2026;
+   прежнее, 18.11: на полке — перезапуск сам) */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
     const upd = () => reg.update().catch(() => {});
@@ -481,10 +552,8 @@ if ('serviceWorker' in navigator) {
   let had = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!had) { had = true; return; }  /* первая установка — не обновление */
-    window.EK_UPDATE = true;
-    if (!window.EK_APP) location.reload(); else window.dispatchEvent(new Event('ekmafisi-update'));
+    document.getElementById('upd').classList.remove('hidden');
   });
-  document.addEventListener('visibilitychange', () => { if (window.EK_UPDATE && window.EK_APP) window.dispatchEvent(new Event('ekmafisi-update')); });
 }
 document.getElementById('upd').onclick = () => location.reload();
 </script>
