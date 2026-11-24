@@ -222,7 +222,6 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 function show(id) {
   stop();
   ['shelf', 'settings', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
-  if (id !== 'slovar') document.documentElement.classList.remove('ety-page');  /* тёплый фон статьи о происхождении — только в «Словаре» */
   window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
   $('goHome').style.visibility = id === 'shelf' ? 'hidden' : '';  /* на полке домик не нужен — место держит */
   if (id === 'shelf') renderShelf();
@@ -516,7 +515,7 @@ function openEtym(l, src) {  /* src — откуда открыто: слово 
   push(curHash(), { k: 'etym', l }); openSheet(history.state.sheet);
 }
 function openSheet(sh) {
-  sheetNow = sh; $('etym').scrollTop = 0; $('etym').classList.toggle('ety-page', sh.k === 'etym');  /* тёплый фон — у статьи о происхождении */
+  sheetNow = sh; $('etym').scrollTop = 0;
   sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : sh.k === 'word' ? renderWord(sh.l) : renderEtym(sh.l);
   $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
 }

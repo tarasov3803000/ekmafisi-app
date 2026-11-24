@@ -255,9 +255,9 @@
   /* слово из статьи → лемма, у которой есть своя статья: точно, иначе без ударений («στολ(ίζω)» → στολίζω) */
   const eSsylka = w => { if (!E) return null; const k = eLemma(w); return k || E.bx.get(gr(w)) || null; };
 
-  /* вид статьи — оформление, одобренное 18.11.2026 (страница-образец, docs/etimologiya.md «Оформление»): тёплый фон, белая
-     карточка, слово и главный абзац — Literata, подписи блоков — мелкими прописными, достоверность — цветной пилюлей,
-     другая версия — тёплая плашка с полосой слева, зацепка — голубая. Пустой блок не выводится.
+  /* вид статьи — строй страницы-образца 18.11.2026 (docs/etimologiya.md «Оформление»), цвета — общие с приложением (25.11.2026):
+     карточка, слово — греческим шрифтом, подписи блоков — мелкими прописными, достоверность — цветной пилюлей,
+     другая версия — плашка с полосой слева, зацепка — на --accent-soft. Пустой блок не выводится.
      Греческое слово, у которого есть своя статья, — ссылка data-ety (хозяин открывает её статью). */
   const ECONF = { 'высокая': 'hi', 'средняя': 'mid', 'спорно': 'lo' };
   const GRWS = /[\u0370-\u03ff\u1f00-\u1fff]+(?:\([\u0370-\u03ff\u1f00-\u1fff]+\)[\u0370-\u03ff\u1f00-\u1fff]*)?/g;  /* и «στολ(ίζω)» — одним словом */
@@ -471,18 +471,23 @@
 .slv-hl .t { white-space: normal; }
 .slv-hl p { margin: 0; padding: 12px 14px; color: var(--muted); }
 .slv-row .slv-q { flex: 1; min-width: 0; }
-/* заголовок — всегда одна строка (решение 16.11.2026): слово с артиклями, значок таблиц и 🔊. Значки — в em от строки;
+/* заголовок — всегда одна строка (решение 16.11.2026): слово с артиклями и 🔊 (значок таблиц и звезда ушли 25.11.2026). Значки — в em от строки;
    кегль слова растёт с масштабом, пока влезает, дальше его ужимает fitHead — не мельче основного текста.
    min-width: 0 и contain: inline-size — иначе слово в одну строку распирает сетку страницы шире экрана (на 375 px с шрифтом +5
    было 457–581 px), и Chrome показывает её «увеличенной». То же у строки под словом (.slv-meta) */
 .slv-head { contain: inline-size; display: flex; align-items: center; gap: .3em; font: 600 calc(32px + var(--up, 0px))/1.15 var(--f-el); }
-.slv-head h1 { flex: 1; min-width: 0; margin: 0; font: inherit; white-space: nowrap; overflow: hidden; }
+.slv-head h1 { flex: 0 1 auto; min-width: 0; margin: 0; font: inherit; white-space: nowrap; overflow: hidden; }
 .slv-head h1.wrap { white-space: normal; overflow-wrap: break-word; }  /* сначала по пробелу после артикля */
+/* слово с таблицами — нажимается: тонкий пунктир под ним; на экране таблиц — цвет и сплошная черта (касание — назад к статье) */
+.slv-head h1.slv-tb1 { cursor: pointer; padding-bottom: .14em; text-decoration: underline dotted var(--muted); text-decoration-thickness: max(1.5px, .05em); text-underline-offset: .16em; -webkit-tap-highlight-color: transparent; border-radius: 4px; }
+.slv-head h1.slv-tb1.on { color: var(--accent); text-decoration-style: solid; text-decoration-color: var(--accent); }
+.slv-head h1.slv-tb1:active { background: var(--accent-soft); }
+.slv-head .slv-say { margin-left: auto; }
 .slv-say { flex: none; width: 1.3em; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-grid; place-items: center; padding: 0; cursor: pointer; font-size: inherit; }
 .slv-say svg { width: 62%; height: 62%; }
 .slv-say.on { background: var(--accent); color: var(--accent-ink); }
 /* строка под словом — всегда одна: часть речи (цветная подложка), транскрипция, частота; не влезает — кегль не растёт */
-.slv-meta { contain: inline-size; margin: -4px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
+.slv-meta { contain: inline-size; margin: -10px 0 -6px; padding: 6px 6px 6px 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
 .slv-meta.fit { font-size: 14px; }
 .slv-meta > * { flex: none; }
 .slv-meta.cut .ipa { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -502,10 +507,7 @@
 .slv-pos[data-c=t] { background: light-dark(#efe8e1, #362d25); color: light-dark(#5e4a37, #d6c2ad); }
 .slv-pos[data-c=i] { background: light-dark(#fbe1ee, #43202f); color: light-dark(#9a2b62, #f2a3c8); }
 .slv-pos[data-c=pp] { background: light-dark(#ecf0d8, #2f3519); color: light-dark(#56651a, #c6d886); }
-.slv-tbbtn { flex: none; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; gap: .2em; padding: 0 .35em; cursor: pointer; font: 600 calc(15px + var(--up, 0px)) var(--f-ui); }
-.slv-head .slv-tbbtn { width: 1.3em; height: 1.3em; padding: 0; border-radius: .3em; font-size: inherit; justify-content: center; }
-.slv-head .slv-tbbtn svg { width: 62%; height: 62%; }
-/* подсказка по долгому нажатию на значок («Склонение», «Спряжение», «Статья») */
+/* подсказка по долгому нажатию на значок («История просмотров», «В избранное») */
 .slv-tip { position: fixed; z-index: 30; max-width: 70vw; background: var(--ink); color: var(--paper); font: 600 calc(14px + var(--up, 0px)) var(--f-ui); padding: 6px 10px; border-radius: 8px; pointer-events: none; box-shadow: 0 4px 16px rgb(0 0 0 / .25); }
 /* греческое в статье и списке — без выделения: касание не зовёт подсказки Google (Touch to Search), как .w в Экмафиси */
 .slv-art [lang="el"], .slv-list .w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -513,8 +515,6 @@
 .slv-w { cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
 .slv-w:active, .slv-w.on { background: var(--accent-soft); }
 .slv-head button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-.slv-tbbtn svg { width: 1.3em; height: 1.3em; }
-.slv-tbbtn.on { background: var(--accent); color: var(--accent-ink); }
 .slv-tbs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 .slv-tbs h2.slv-voice { grid-column: 1 / -1; margin: 8px 0 -4px; }
 .slv-tb { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
@@ -531,8 +531,10 @@
 .slv-nota { display: grid; gap: 8px; }
 .slv-nota:empty { display: none; }
 .slv-note.slv-f4 { font: calc(17px + var(--up, 0px))/1.45 var(--f-el); }
-.slv-star { flex: none; width: 1.3em; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-grid; place-items: center; padding: 0; cursor: pointer; font-size: inherit; }
-.slv-star svg { width: 62%; height: 62%; }
+/* звезда избранного — в строке под словом, справа, кеглем строки (25.11.2026); касание шире самой звезды */
+.slv-star { flex: none; margin: -6px -6px -6px auto; width: calc(1.2em + 12px); height: calc(1.2em + 12px); border: 0; background: none; color: var(--muted); display: inline-grid; place-items: center; padding: 0; cursor: pointer; font-size: inherit; -webkit-tap-highlight-color: transparent; }
+.slv-star svg { width: 1.2em; height: 1.2em; }
+.slv-star.on { color: var(--accent); }
 .slv-star.on svg { fill: currentColor; }
 .slv-list .slv-vk { display: flex; gap: 18px; padding: 10px 14px 4px; }
 .slv-list .slv-vk button { display: inline; border: 0; padding: 0; background: none; font-size: calc(12px + var(--up, 0px)); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
@@ -556,38 +558,36 @@
 .slv-ph { display: grid; gap: 6px; }
 .slv-ph div { font-size: calc(15px + var(--up, 0px)); }
 .slv-ph .e { font: calc(16px + var(--up, 0px)) var(--f-el); }
+.slv-ph .lb { font-style: italic; color: var(--muted); }
+.slv-zamb { display: grid; gap: 12px; }
+.slv-zamb:empty { display: none; }
+.slv-zam { margin: 0; font-size: calc(15px + var(--up, 0px)); line-height: 1.5; }
+.slv-zam .slv-w { font-family: var(--f-el); }
 .slv-forms { font: calc(16px + var(--up, 0px))/1.5 var(--f-el); color: var(--muted); }
-/* --- происхождение: токены страницы-образца (одобрено 18.11.2026), свои имена --ety-*, тёмная тема — те же роли --- */
-:root { --ety-bg: #f7f6f2; --ety-card: #ffffff; --ety-fg: #1f2124; --ety-mut: #686b70; --ety-line: #e2e0d9; --ety-acc: #2c5f7c;
-  --ety-alt: #fbf3e2; --ety-alt-line: #e3c98d; --ety-hook: #eaf1f4; --ety-ok: #2f7a4b; --ety-mid: #9a6a10; --ety-lo: #a3402f;
-  --ety-disp: "Literata", Georgia, "Times New Roman", serif; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ety-bg: #17191b; --ety-card: #1f2225; --ety-fg: #e8e7e3;
-  --ety-mut: #9da1a6; --ety-line: #34383c; --ety-acc: #8cc1dc; --ety-alt: #2b2518; --ety-alt-line: #6e5a2c; --ety-hook: #1d2a31;
-  --ety-ok: #7fcf9b; --ety-mid: #e2b45b; --ety-lo: #ef8f7d; } }
-:root[data-theme="dark"] { --ety-bg: #17191b; --ety-card: #1f2225; --ety-fg: #e8e7e3; --ety-mut: #9da1a6; --ety-line: #34383c;
-  --ety-acc: #8cc1dc; --ety-alt: #2b2518; --ety-alt-line: #6e5a2c; --ety-hook: #1d2a31; --ety-ok: #7fcf9b; --ety-mid: #e2b45b; --ety-lo: #ef8f7d; }
-html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
-.ety { background: var(--ety-card); color: var(--ety-fg); border: 1px solid var(--ety-line); border-radius: 10px; padding: 18px 18px 14px;
-  display: grid; gap: 14px; min-width: 0; overflow-wrap: break-word; font-size: calc(16px + var(--up, 0px)); line-height: 1.6; text-align: left; }
+/* --- происхождение: та же палитра, что у всего приложения (--paper, --card, --ink, --muted, --line, --accent, --accent-soft;
+   решение 25.11.2026, было — свои токены --ety-* и бумажный фон страницы-образца 18.11.2026); греческое — --f-el, текст — --f-ui */
+.ety { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+  display: grid; gap: 14px; min-width: 0; overflow-wrap: break-word; font-size: calc(16px + var(--up, 0px)); line-height: 1.55; text-align: left; }
 .ety p, .ety ul, .ety ol { margin: 0; }
 .ety-shapka { display: grid; gap: 4px; }
-.ety h2 { font: 600 calc(32px + var(--up, 0px))/1.1 var(--ety-disp); margin: 0; letter-spacing: 0; text-transform: none; color: var(--ety-fg); }
-.ety-pos { color: var(--ety-mut); font-size: .9em; margin-right: 4px; }
-.ety h3 { font: 600 calc(11.5px + var(--up, 0px))/1.3 var(--f-ui, system-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ety-mut); margin: 0 0 6px; }
+.ety h2 { font: 600 calc(32px + var(--up, 0px))/1.15 var(--f-el); margin: 0; letter-spacing: 0; text-transform: none; color: var(--ink); }
+.ety-pos { color: var(--muted); font-size: .9em; margin-right: 4px; }
+.ety h3 { font: 700 calc(13px + var(--up, 0px))/1.3 var(--f-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
 .ety-conf { justify-self: start; font-size: calc(12.5px + var(--up, 0px)); padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
-.ety-conf.hi { color: var(--ety-ok); } .ety-conf.mid { color: var(--ety-mid); } .ety-conf.lo { color: var(--ety-lo); }
-.ety-razbor { font: 400 calc(17px + var(--up, 0px))/1.6 var(--ety-disp); }
-.ety-alt { font-size: .95em; background: var(--ety-alt); border-left: 3px solid var(--ety-alt-line); padding: 6px 10px; border-radius: 0 6px 6px 0; }
+.ety-conf.hi { color: var(--g); } .ety-conf.mid { color: var(--y); } .ety-conf.lo { color: var(--r); }
+.ety-razbor { font-size: calc(17px + var(--up, 0px)); line-height: 1.55; }
+.ety-alt { font-size: .95em; background: var(--paper); border-left: 3px solid var(--line); padding: 6px 10px; border-radius: 0 8px 8px 0; }
 .ety-fam { padding-left: 1.1em; columns: 2; column-gap: 24px; } .ety-fam li { break-inside: avoid; }
 @media (max-width: 520px) { .ety-fam { columns: 1; } }
-.ety-lng { color: var(--ety-mut); font-size: .88em; }
-.ety-hook { background: var(--ety-hook); border-radius: 8px; padding: 10px 12px; }
-.ety-ist { font-size: .88em; color: var(--ety-mut); } .ety-ist summary { cursor: pointer; }
-.ety-ist ol { margin: 6px 0 0; padding-left: 1.4em; overflow-wrap: anywhere; } .ety-ist p { margin-top: 6px; } .ety a { color: var(--ety-acc); }
-.ety-net { color: var(--ety-mut); }
+.ety-lng { color: var(--muted); font-size: .88em; }
+.ety-hook { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; }
+.ety-ist { font-size: .88em; color: var(--muted); } .ety-ist summary { cursor: pointer; }
+.ety-ist ol { margin: 6px 0 0; padding-left: 1.4em; overflow-wrap: anywhere; } .ety-ist p { margin-top: 6px; } .ety a { color: var(--accent); }
+.ety-net { color: var(--muted); }
 .ety [lang="el"], .ety-w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-.ety-w { color: var(--ety-acc); cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
-.ety-w:active, .ety-w.on { background: var(--ety-hook); }
+.ety-razbor [lang="el"], .ety-alt [lang="el"], .ety-hook [lang="el"], .ety p [lang="el"], .ety li [lang="el"], .ety-w { font-family: var(--f-el); }
+.ety-w { color: var(--accent); cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
+.ety-w:active, .ety-w.on { background: var(--accent-soft); }
 /* строка «Происхождение ›» с выжимкой: в статье словаря и в карточке слова Экмафиси */
 .ety-row { display: grid; gap: 2px; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); padding: 10px 0 0; font: inherit; cursor: pointer; }
 .ety-row .k { color: var(--accent); font-weight: 600; font-size: calc(15px + var(--up, 0px)); }
@@ -597,8 +597,6 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
 `;
   const ANDROID = /android/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent);
   const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
-  const TBI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 10h18M3 15h18M10 4v16"/></svg>';
-  const ARTI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7M9 19h4"/></svg>';
   const tbName = s => (s.p || '').startsWith('глагол') ? 'Спряжение' : 'Склонение';
   function tbHtml(bloki) {
     let h = '<div class="slv-tbs">', voice = null;
@@ -631,9 +629,45 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
     return n.split(/;\s*/).map(seg => chasti(seg).filter(p => !lishnyaya(p)).join(', ')).filter(Boolean).join('; ');
   }
   const glagol = s => (s.p || '').startsWith('глагол');
-  function notaHtml(s, t) {  /* заметка и под ней строка форм глагола (t — таблицы слова; нет — заметка как есть) */
-    const f = t && glagol(s) ? formy4(t) : null, n = s.n && f ? bezForm(s.n, f) : s.n;
-    return (n ? `<p class="slv-note">${esc(n)}</p>` : '') + (f ? `<p class="slv-note slv-f4" lang="el">${f.filter(Boolean).map(x => esc(x[0]).replace(/ /g, '\u00a0')).join(' · ')}</p>` : '');
+  /* заметка s.n — по частям (через «;»), решение 25.11.2026: верх статьи — только то, без чего слово употребят неверно
+     (аориста нет, только мн., несклон., отлож., безл., падеж после предлога); образцы употребления («προλαβαίνω να + гл. —
+     успеть сделать», «μετά από + вин.», «λέω κάτι σε κάποιον») — первыми в «Выражения»; прочая грамматика (формы, варианты,
+     род, «перех.», «не путать с») — блоком «Заметки» внизу. Данные не трогаются: делится при отрисовке */
+  const NGR = /[Ͱ-Ͽἀ-῿]/, NGR0 = /^[Ͱ-Ͽἀ-῿]/;
+  const NVERH = /^(?:неправ\.?:?\s*)?(?:аориста нет|нет аориста|без аориста|только\s|несклон|не склон|нескл|неизм|не изм|отлож|безл\.?$|безл\.?,\s*только)/i;
+  const NGRAMM = /^(?:вариант|тж\.|также|мн\.|ед\.|род\.|вин\.|им\.|ж\.|м\.|ср\.|сравн|превосх|уменьш|увелич|страд|аор|прош|буд|повел|прич|сущ|нареч|жен|муж|книжн|разг|синоним|антоним|=)/;
+  const NRUGR = /^(?:ж\.|м\.|ср\.|общ|обычно (?:мн|ед)|чаще (?:мн|ед)|часто (?:мн|ед|как сущ|субст)|только|перех|неперех|непереход|переход|субстантив|(?:обычно )?с прописной|книжн|разг|вариант|устар|мн\.|ед\.)/;
+  const NGRLB = /^(?:αόρ|παθ|μτχ|ενεστ|μέλλ|πληθ|θηλ|ουδ)\./;  /* греческие пометы: «αόρ. αισθάνθηκα» — форма, не выражение */
+  const glubina = s => (s.match(/\(/g) || []).length - (s.match(/\)/g) || []).length;
+  /* «безл. μου έρχεται» → { lb: 'безл.', el: 'μου έρχεται' }: русская помета перед греческим — подписью, как у значений */
+  const pometa = (el, ru) => { const m = el.match(/^([^Ͱ-Ͽἀ-῿]*?[.:])\s+(?=[Ͱ-Ͽἀ-῿])/); return m && !/[+—«(]/.test(m[1]) ? { lb: m[1].replace(/:$/, ''), el: el.slice(m[0].length), ru } : { el, ru }; };
+  function notaRazbor(s) {  /* → { verh, vyr: [{ lb?, el, ru }], ost } */
+    const verh = [], vyr = [], ost = [];
+    for (let seg of (s.n || '').split(/;\s*/)) {
+      seg = seg.trim(); if (!seg) continue;
+      if (NVERH.test(seg) || /^предлог/.test(s.p || '') && /^\+\s*(?:вин|род|им|дат)\.?(?: п\.)?$/.test(seg)) { verh.push(seg); continue; }
+      const i = seg.indexOf(' — '), a = seg.slice(0, i).trim(), b = seg.slice(i + 3).trim();
+      if (i > 0 && seg.indexOf(' — ', i + 3) < 0 && !glubina(a) && !/^(?:вариант|неизм|не изм)/.test(a)) {
+        if (NGR.test(a) && !NGR.test(b) && !NRUGR.test(b) && !NGRLB.test(a)) { vyr.push(pometa(a, b)); continue; }  /* греческое — перевод */
+        if (!NGR.test(a) && NGR0.test(b)) { vyr.push({ el: b, ru: a }); continue; }  /* «после чего — μετά + вин.» */
+      }
+      if (i < 0 && NGR0.test(seg) && !NGRLB.test(seg) && !seg.startsWith(s.l + ',')) { vyr.push({ el: seg, ru: '' }); continue; }  /* образец без перевода; «πολύς, πολλή, πολύ» — формы */
+      const k = seg.indexOf(': ');
+      if (i < 0 && k > 0 && !NGR.test(seg.slice(0, k)) && NGR0.test(seg.slice(k + 2)) && !NGRAMM.test(seg) && !glubina(seg.slice(0, k))) { vyr.push({ el: seg.slice(k + 2), ru: seg.slice(0, k) }); continue; }  /* «возраст: είναι δέκα χρονών» */
+      ost.push(seg);
+    }
+    return { verh: verh.join('; '), vyr, ost: ost.join('; ') };
+  }
+  /* верх статьи: ограничения слова и строка форм глагола — παρατατικός · аорист · будущее (настоящее — в заголовке, 25.11.2026);
+     t — таблицы слова, нет — без строки форм. Из заметки (верха и «Заметок») убирается то, что стоит в строке форм */
+  const formyT = (s, t) => t && glagol(s) ? formy4(t) : null;
+  function notaHtml(s, t, nr) {
+    const f = formyT(s, t), n = nr.verh && f ? bezForm(nr.verh, f) : nr.verh;
+    return (n ? `<p class="slv-note">${esc(n)}</p>` : '') + (f ? `<p class="slv-note slv-f4" lang="el">${f.slice(1).filter(Boolean).map(x => esc(x[0]).replace(/ /g, ' ')).join(' · ')}</p>` : '');
+  }
+  function zametkiHtml(s, t, nr) {
+    const f = formyT(s, t), n = nr.ost && f ? bezForm(nr.ost, f) : nr.ost;
+    return n ? `<h2>Заметки</h2><p class="slv-zam">${slova(n)}</p>` : '';
   }
   /* избранные слова — общие с Экмафиси (ключ ekmafisi.<id>.izbr, строки { l, s, b }, новые сверху); на сервер — настройкой izbr
      (EK.queueSettings, отправляет Экмафиси), чужие устройства приходят через Экмафиси (app.js, onRemote) */
@@ -731,7 +765,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
     window.addEventListener('slovar-novoe', () => { status(); if (!cur) { if (q.value.trim()) { res = search(q.value); drawList(); } else drawList(); } });
     let t = 0;
     q.addEventListener('input', () => {
-      if (cur || hist) { cur = null; curS = null; hist = false; showTok++; etyPage(false); art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
+      if (cur || hist) { cur = null; curS = null; hist = false; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
       clearTimeout(t); t = setTimeout(run, 120);
     });
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && res.length) { q.blur(); pick(row(res[0]).l); } });
@@ -798,7 +832,10 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
         if (l && l !== cur) { sw.classList.add('on'); setTimeout(() => pick(l), 90); }  /* подложка успевает мелькнуть */
         return;
       }
-      if (e.target.closest('.slv-tbbtn')) { pick(cur, mode === 'tab' ? null : 'tab'); return; }  /* рубильник «таблицы / статья» */
+      if (e.target.closest('.slv-head h1.slv-tb1')) {  /* слово: статья → таблицы; таблицы → назад к статье, как «← к статье» */
+        if (mode === 'tab') opts.onBack ? opts.onBack() : api.show(cur); else pick(cur, 'tab');
+        return;
+      }
       if (!cur || !curS) return;
       const s = curS;
       const zv = e.target.closest('.slv-star');
@@ -815,10 +852,9 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
       if (x) { const ex = s.z[+x.dataset.z].ex[+x.dataset.x]; play(sayText(ex.el), ex.a && D.zvukP ? D.zvukP + ex.a + '.mp4' : null, x); }
     });
 
-    const etyPage = on => document.documentElement.classList.toggle('ety-page', !!on);
     function article(l, m, s) {
       curS = s;
-      art.classList.toggle('ety-on', m === 'etym'); etyPage(m === 'etym');
+      art.classList.toggle('ety-on', m === 'etym');
       if (m === 'etym') {  /* статья о происхождении — отдельным экраном той же статьи: «←» — к статье словаря */
         mode = 'etym';
         const top = `<div class="slv-etytop"><button class="slv-back">← ${esc(s.s)}</button><button class="slv-hist" aria-label="История просмотров" data-tip="История просмотров">${CLOCK}</button></div>`;
@@ -832,10 +868,11 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
         return;
       }
       const tab = m === 'tab' && s.tb;
-      const tbBtn = s.tb ? (tab ? `<button class="slv-tbbtn on" aria-label="Статья" title="Статья" data-tip="Статья">${ARTI}</button>`
-        : `<button class="slv-tbbtn" aria-label="${tbName(s)}" title="${tbName(s)}" data-tip="${tbName(s)}">${TBI}</button>`) : '';
-      let h = `<button class="slv-back">← ${q.value.trim() ? 'к списку' : 'к поиску'}</button>
-        <div class="slv-head"><h1 lang="el">${esc(s.s)}</h1>${tbBtn}<button class="slv-say" aria-label="Произнести">${SPK}</button>${starHtml(l)}</div>`;
+      /* слово в заголовке (решение 25.11.2026): касание — словоформы (таблицы) и обратно к статье, долгое — происхождение.
+         Значка таблиц нет; что слово нажимается, видно по тонкому пунктиру под ним (на экране таблиц — цветом и сплошной чертой) */
+      const h1 = `<h1 lang="el"${s.tb ? ` class="slv-tb1${tab ? ' on' : ''}" role="button" aria-label="${esc(s.s)} — ${tab ? 'к статье' : tbName(s).toLowerCase()}"` : ''}>${esc(s.s)}</h1>`;
+      let h = `<button class="slv-back">← ${tab ? 'к статье' : q.value.trim() ? 'к списку' : 'к поиску'}</button>
+        <div class="slv-head">${h1}<button class="slv-say" aria-label="Произнести">${SPK}</button></div>`;
       if (tab) {  /* таблицы — отдельным экраном той же статьи */
         mode = 'tab';
         const t = D.ptr.tablicyN ? tbSync(l) : null;
@@ -846,19 +883,26 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
       }
       mode = null;
       h += `
-        <p class="slv-meta">${s.p ? `<span class="slv-pos" data-c="${posC(s.p)}">${esc(s.p)}</span>` : ''}${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.r ? `<span class="fr" title="место по частоте${s.v ? ' — вместе с ' + esc(s.v) : ''}">${FR}${num(s.r)}</span>` : ''}</p>
+        <p class="slv-meta">${s.p ? `<span class="slv-pos" data-c="${posC(s.p)}">${esc(s.p)}</span>` : ''}${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.r ? `<span class="fr" title="место по частоте${s.v ? ' — вместе с ' + esc(s.v) : ''}">${FR}${num(s.r)}</span>` : ''}${starHtml(l)}</p>
         ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}
         ${(s.o || []).map(o => `<p class="slv-var">также форма${o.t ? ' ' + esc(o.t) : ''} от <button class="slv-link" lang="el" data-l="${esc(o.k)}">${esc(o.k)}</button></p>`).join('')}`;
       const t0 = s.tb && glagol(s) && D.ptr.tablicyN ? tbSync(l) : null;  /* таблицы в памяти — формы сразу; нет — встанут, когда откроются */
-      h += `<div class="slv-nota">${notaHtml(s, t0)}</div>`;
+      const nr = notaRazbor(s);
+      h += `<div class="slv-nota">${notaHtml(s, t0, nr)}</div>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
         `<li><span class="e" lang="el">${slova(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
-      if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${slova(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
+      const vyr = [...nr.vyr, ...(s.f || [])];  /* образцы из заметки — первыми */
+      if (vyr.length) h += '<h2>Выражения</h2><div class="slv-ph">' + vyr.map(x => `<div>${x.lb ? `<span class="lb">${esc(x.lb)}</span> ` : ''}<span class="e" lang="el">${slova(x.el)}</span>${x.ru ? ' — ' + esc(x.ru) : ''}</div>`).join('') + '</div>';
+      h += `<div class="slv-zamb">${zametkiHtml(s, t0, nr)}</div>`;
       if (s.c && s.c.length && !s.tb) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
       const e0 = etimSync(l);  /* «Происхождение ›» с выжимкой; файл ещё открывается — строка встанет, когда откроется */
       h += `<div class="slv-ety">${e0 ? etimRow(l, e0) : ''}</div>`;
       art.innerHTML = h;
-      if (t0 === undefined) tablicy(l).then(t => { const b = cur === l && mode === null && art.querySelector('.slv-nota'); if (b && t) b.innerHTML = notaHtml(s, t); }).catch(() => {});
+      if (t0 === undefined) tablicy(l).then(t => {
+        if (!t || cur !== l || mode !== null) return;
+        const b = art.querySelector('.slv-nota'), z = art.querySelector('.slv-zamb');
+        if (b) b.innerHTML = notaHtml(s, t, nr); if (z) z.innerHTML = zametkiHtml(s, t, nr);
+      }).catch(() => {});
       if (e0 === undefined) etim(l).then(e => { const b = cur === l && mode === null && art.querySelector('.slv-ety'); if (b && e) b.innerHTML = etimRow(l, e); }).catch(() => {});
       fitHead(art.querySelector('.slv-head'), art);  /* до отрисовки: страница ни на миг не шире экрана */
       requestAnimationFrame(() => fitMeta(art.querySelector('.slv-meta')));
@@ -872,7 +916,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
       const was = cur, y = window.scrollY;
       if (was) artY.set(was, y); else if (!hist) listY = y;
       showTok++; want = null; wantM = 'hist'; cur = null; curS = null; mode = 'hist'; hist = true;
-      art.classList.remove('ety-on'); etyPage(false);
+      art.classList.remove('ety-on');
       art.innerHTML = `<button class="slv-back">← назад</button><h2 class="slv-hh">История просмотров</h2>
         <input class="slv-q slv-hq" type="search" placeholder="Поиск в истории" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Поиск в истории" data-lpignore="true" data-form-type="other">
         <div class="slv-list slv-hl"></div>`;
@@ -912,7 +956,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
           if (cur && !was && !wasH) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
           if (cur && was && was !== cur) artY.set(was, y);  /* из статьи в статью (слово примера) */
           art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
-          if (!cur) { drawList(); art.classList.remove('ety-on'); etyPage(false); }
+          if (!cur) { drawList(); art.classList.remove('ety-on'); }
           if (cur) {
             refit();
             const ay = was !== cur && artY.has(cur) ? artY.get(cur) : 0; artY.delete(cur);
