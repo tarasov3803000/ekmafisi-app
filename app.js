@@ -1404,6 +1404,7 @@ EK.onRemote = ({ progress, log, settings }) => {
     if (G_SYNC.includes(k)) G[k] = r.v;
     else if (k === 'flags') write(FKEY, r.v || {});
     else if (k === 'soberi') { SB = Object.assign(SB, r.v || {}); write(SBKEY, SB); }
+    else if (k === 'izbr') write('ekmafisi.izbr', r.v || []);  /* → ekmafisi.<id>.izbr, избранные слова словаря (app/slovar.js) */
     else if (k.startsWith('pos.') && byId[k.slice(4)]) Object.assign(progFor(k.slice(4)), r.v || {});
   });
   write(TKEY, T); write(SKEY, G);
