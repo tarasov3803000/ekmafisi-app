@@ -179,9 +179,25 @@ function toggle(el, start) {
   start();
 }
 function playBy(el, i, rate, done) { stop(); owner = el; playOne(i, rate, done); paintOwner(); }
-function playOne(i, rate, done) {
+/* звук текста загружен и файл открыт (есть длительность): раньше ▶ сразу после открытия нового текста, пока звук
+   грузился, считал фразы сыгранными — терялась первая фраза или её начало (Ваше замечание, 25.11.2026); ждём
+   загрузку, а метаданные — не дольше 1,5 с (iOS без касания может не открыть файл до play) */
+function audioOpen() {
+  return audioReady.then(() => audio.readyState >= 1 ? null : new Promise(r => {
+    const f = () => { audio.removeEventListener('loadedmetadata', f); clearTimeout(t); r(); };
+    const t = setTimeout(f, 1500); audio.addEventListener('loadedmetadata', f);
+  }));
+}
+function playOne(i, rate, done, waited) {
   cancelAnimationFrame(raf); audio.pause(); paused = false;
-  if (!blobs[M.id]) { done && done(); return; }
+  if (!blobs[M.id] || (audio.readyState < 1 && !waited)) {
+    const tok = seqToken, m = M;
+    audioOpen().then(() => {
+      if (tok !== seqToken || M !== m) return;   /* пока ждали — остановили или открыли другой текст */
+      if (blobs[M.id]) playOne(i, rate, done, true); else stop();   /* звук не загрузился — сообщение уже на экране */
+    });
+    return;
+  }
   audio.defaultPlaybackRate = rate; audio.playbackRate = rate;
   audio.preservesPitch = true; audio.webkitPreservesPitch = true;
   /* фразы лежат в файле подряд, каждая с затуханием и тишиной после: at — начало фразы в файле */
