@@ -752,7 +752,8 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
       mode = null;
       h += `
         <p class="slv-meta">${s.p ? `<span class="slv-pos" data-c="${posC(s.p)}">${esc(s.p)}</span>` : ''}${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.r ? `<span class="fr" title="место по частоте${s.v ? ' — вместе с ' + esc(s.v) : ''}">${FR}${num(s.r)}</span>` : ''}</p>
-        ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}`;
+        ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}
+        ${(s.o || []).map(o => `<p class="slv-var">также форма${o.t ? ' ' + esc(o.t) : ''} от <button class="slv-link" lang="el" data-l="${esc(o.k)}">${esc(o.k)}</button></p>`).join('')}`;
       if (s.n) h += `<p class="slv-note">${esc(s.n)}</p>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
         `<li><span class="e" lang="el">${slova(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
@@ -773,7 +774,11 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
         want = l; wantM = m || null;
         const tok = ++showTok, was = cur, y = window.scrollY;
         if (!D) { if (!l) drawList(); return; }  /* словарь ещё открывается: список «Недавних» уже виден, статья — когда готов */
-        const i = l ? by(l) : undefined;
+        let i = l ? by(l) : undefined;
+        if (l && i === undefined) {  /* статьи нет — форма другого слова (δεχτεί, ссылка из истории): статья, к которой форма ведёт */
+          const l2 = slovoLemma(l);
+          if (l2 && l2 !== l) { l = l2; i = by(l2); }
+        }
         const put = s => {
           if (tok !== showTok) return;  /* пока разбиралась, открыли другое */
           if (s) article(l, m, s);
