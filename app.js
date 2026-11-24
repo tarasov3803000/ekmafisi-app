@@ -218,6 +218,7 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 function show(id) {
   stop();
   ['shelf', 'settings', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  if (id !== 'slovar') document.documentElement.classList.remove('ety-page');  /* тёплый фон статьи о происхождении — только в «Словаре» */
   window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
   $('goHome').style.visibility = id === 'shelf' ? 'hidden' : '';  /* на полке домик не нужен — место держит */
   if (id === 'shelf') renderShelf();
@@ -240,9 +241,9 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
 }
 function parseHash(h) {
   if (['settings', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
-  if (h === 'slovar' || h.startsWith('slovar/')) {  /* #slovar/<лемма>[/tab] — статья или её таблицы */
-    const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.endsWith('/tab');
-    return { v: 'slovar', l: m ? r.slice(0, -4) : r, m: m ? 'tab' : null };
+  if (h === 'slovar' || h.startsWith('slovar/')) {  /* #slovar/<лемма>[/tab|/etym] — статья, её таблицы или происхождение */
+    const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.match(/\/(tab|etym)$/);
+    return { v: 'slovar', l: m ? r.slice(0, -m[0].length) : r, m: m ? m[1] : null };
   }
   for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
   return LIB.some(m => m.id === h) ? { v: 'home', id: h } : { v: 'shelf' };
@@ -450,8 +451,9 @@ function glossHtml(w, p, k) {
   else if (base(w.t) !== base(w.l)) h += `<div class="el">${esc(w.l)}</div>`;
   const a = [];
   if (D && D.dict.senses.length) a.push(`<button class="link" data-senses="${esc(w.l)}">Значения</button>`);
-  if (D && D.etym) a.push(`<button class="link" data-etym="${esc(w.l)}">Происхождение</button>`);
   if (a.length) h += `<div class="gl-links">${a.join('<span class="muted">·</span>')}</div>`;
+  /* «Происхождение ›» с выжимкой — второй путь к статье, для тех, кто про долгое нажатие не знает (решение 5.11.2026) */
+  if (!M || M.lang === 'el') h += Slovar.etimRow(w.l, Slovar.etimSync(w.l));
   return h;
 }
 /* нажатое слово подсвечено в предложении, пока открыта его карточка */
@@ -493,21 +495,19 @@ function showInline(box, src, fn) {
 }
 function openEtym(l, src) {  /* src — откуда открыто: слово или ссылка; по нему — место статьи на широком экране */
   const log = read(EKEY) || [];
-  if (LEX[l]) { const id = uuid(), at = now(); log.push({ id, l, t: at.slice(0, 16) }); write(EKEY, log); EK.queueLog({ id, at, kind: 'etym', lang: (M && M.lang) || 'el', lemma: l }); }
+  if ((!M || M.lang === 'el') && Slovar.etimSync(l) !== null) { const id = uuid(), at = now(); log.push({ id, l, t: at.slice(0, 16) }); write(EKEY, log); EK.queueLog({ id, at, kind: 'etym', lang: (M && M.lang) || 'el', lemma: l }); }
   const box = inlineBox(src);
   if (box) return showInline(box, src, b => renderEtym(l, b));
   push(curHash(), { k: 'etym', l }); openSheet(history.state.sheet);
 }
 function openSheet(sh) {
-  sheetNow = sh; $('etym').scrollTop = 0;
+  sheetNow = sh; $('etym').scrollTop = 0; $('etym').classList.toggle('ety-page', sh.k === 'etym');  /* тёплый фон — у статьи о происхождении */
   sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : sh.k === 'word' ? renderWord(sh.l) : renderEtym(sh.l);
   $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
 }
 function closeSheet() { sheetNow = null; $('etym').classList.add('hidden'); document.body.style.overflow = ''; }
 $('eHist').onclick = () => { if (!sheetNow || sheetNow.k !== 'hist') { push(curHash(), { k: 'hist' }); openSheet(history.state.sheet); } };
-let etymCur = null;  /* чья статья на виду — на себя ссылкой не ведёт */
-const elLink = s => { const cur = etymCur; const k = Object.keys(LEX).find(l => base(l) === base(s) && l !== cur); return k ? `<button class="link el" data-etym="${esc(k)}">${esc(s)}</button>` : `<span class="el">${esc(s)}</span>`; };
-const sec = (t, body) => body ? `<section class="e-sec"><h2>${t}</h2>${body}</section>` : '';
+let etymCur = null;  /* чья статья на виду: пока грузится, могли открыть другую */
 function headHtml(l, D) {
   const L = lexOf(l) || {}, p = phraseOf(l), forms = formsOf(L, D);
   return `<div class="e-head"><span class="lem">${esc(l)}</span><span>${esc(cap(L.ru || D.dict.senses[0]?.ru || ''))}</span>
@@ -521,32 +521,29 @@ function renderSenses(l, inl) {
   if (!D) { box.innerHTML = top + `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статьи пока нет.</p>`; return; }
   box.innerHTML = top + headHtml(l, D) + sensesHtml(D.dict) + `<div class="e-foot"><span>Значения написаны ИИ (Claude) по Викисловарю (CC BY-SA); человеком — не проверено.</span></div>`;
 }
+/* статья о происхождении — общий вид с «Словарём» (app/slovar.js, etimHtml; файл el/etim-<отп>.txt.gz, tools/etim_telefon.py) */
 function renderEtym(l, inl) {
-  const D = LEX[l], [box, top] = boxOf(inl, 'Происхождение'), q = id => box.querySelector('#' + id);
+  const [box, top] = boxOf(inl, 'Происхождение'), q = id => box.querySelector('#' + id);
   etymCur = l;
-  if (!D) { box.innerHTML = top + `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">${M && M.lang !== 'el' ? 'Статей о происхождении для этого языка пока нет.' : 'Статьи пока нет: в пробе — 50 слов «Ёлки» и βάζω.'}</p>`; return; }
-  const e = D.etym;
-  const END = { unknown: 'Дальше происхождение неизвестно.', reconstruction_only: 'Дальше — только реконструкции; их не приводим.' };
-  box.innerHTML = top + headHtml(l, D) + `
-    ${sec('Состав', e.parts && `<p>${esc(e.parts)}</p>`)}
-    ${sec('Происхождение', (e.chain.length ? '<ul class="chain">' + e.chain.map(c => `<li><span class="st">${esc(c.stage)}</span><span>${elLink(c.form)} — ${esc(c.meaning)}</span></li>`).join('') + '</ul>' : '')
-      + (END[e.chain_end] ? `<p class="muted small">${END[e.chain_end]}</p>` : '') + (e.shift ? `<p>${esc(e.shift)}</p>` : ''))}
-    ${sec('Семья в греческом', e.family.length && '<ul>' + e.family.map(f => `<li>${elLink(f.el)} — ${esc(f.ru)}</li>`).join('') + '</ul>')}
-    ${sec('В русском и европейских', e.loans.length && '<ul>' + e.loans.map(x => `<li><b>${esc(x.word)}</b> <span class="muted small">${esc(x.lang)}</span>${x.via ? ` ← <span class="el">${esc(x.via)}</span>` : ''}</li>`).join('') + '</ul>')}
-    ${sec('В церковном языке', e.church && `<p>${esc(e.church)}</p>`)}
-    ${sec('Зацепка', e.hook && `<p>${esc(e.hook)}</p>`)}
-    <div class="e-foot"><span>Достоверность: ${esc(D.confidence)}. Написано ИИ (Claude) по источникам и проверено кодом; человеком — не проверено.</span>
-      <span>Источники: ${D.sources.map(esc).join('; ')}. По материалам Викисловаря (CC BY-SA).</span></div>
-    <div class="e-sec"><button class="link" id="eFlag" style="justify-self:start">Неверно?</button>
-      <div id="eFlagBox" class="hidden" style="display:grid;gap:8px"><textarea id="eFlagText" placeholder="Что не так — коротко"></textarea><button class="btn" id="eFlagSave">Сохранить</button></div></div>`;
-  const flags = read(FKEY) || {};
-  if (flags[l]) { q('eFlagText').value = flags[l].text; q('eFlag').textContent = 'Отмечено: неверно — изменить'; }
-  q('eFlag').onclick = () => q('eFlagBox').classList.remove('hidden');
-  q('eFlagSave').onclick = () => {
-    const f = read(FKEY) || {}, t = q('eFlagText').value.trim();
-    if (t) f[l] = { text: t, t: new Date().toISOString().slice(0, 16) }; else delete f[l];
-    write(FKEY, f); setSynced('flags', f); q('eFlagBox').classList.add('hidden'); q('eFlag').textContent = t ? 'Отмечено: неверно — изменить' : 'Неверно?';
+  if (M && M.lang !== 'el') { box.innerHTML = top + `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статей о происхождении для этого языка пока нет.</p>`; return; }
+  const draw = e => {
+    if (etymCur !== l) return;
+    box.innerHTML = top + Slovar.etimHtml(l, e) + (e ? `<div class="e-sec"><button class="link" id="eFlag" style="justify-self:start">Неверно?</button>
+      <div id="eFlagBox" class="hidden" style="display:grid;gap:8px"><textarea id="eFlagText" placeholder="Что не так — коротко"></textarea><button class="btn" id="eFlagSave">Сохранить</button></div></div>` : '');
+    if (!e) return;
+    const flags = read(FKEY) || {};
+    if (flags[l]) { q('eFlagText').value = flags[l].text; q('eFlag').textContent = 'Отмечено: неверно — изменить'; }
+    q('eFlag').onclick = () => q('eFlagBox').classList.remove('hidden');
+    q('eFlagSave').onclick = () => {
+      const f = read(FKEY) || {}, t = q('eFlagText').value.trim();
+      if (t) f[l] = { text: t, t: new Date().toISOString().slice(0, 16) }; else delete f[l];
+      write(FKEY, f); setSynced('flags', f); q('eFlagBox').classList.add('hidden'); q('eFlag').textContent = t ? 'Отмечено: неверно — изменить' : 'Неверно?';
+    };
   };
+  const e0 = Slovar.etimSync(l);
+  if (e0 !== undefined) return draw(e0);
+  box.innerHTML = top + '<p class="muted">Открываю статьи о происхождении…</p>';
+  Slovar.etim(l).then(draw, err => { if (etymCur === l) box.innerHTML = top + `<p class="muted">${esc(err.message || String(err))}</p>`; });
 }
 function renderHist() {
   $('eTtl').textContent = 'История';
@@ -557,7 +554,7 @@ function renderHist() {
   const draw = q => {
     const qq = base(q || '');
     const rows = items.filter(l => !qq || base(l).includes(qq) || base((lexOf(l) || {}).ru || '').includes(qq));
-    $('hList').innerHTML = rows.length ? rows.map(l => `<button data-etym="${esc(l)}"><span><span class="el">${esc(l)}</span> <span class="muted small">${esc((lexOf(l) || {}).ru || '')}</span></span><span class="small muted">${esc(LEX[l]?.etym.gist || '')} · ${seen[l].n} ${plural(seen[l].n, 'раз', 'раза', 'раз')}</span></button>`).join('')
+    $('hList').innerHTML = rows.length ? rows.map(l => `<button data-etym="${esc(l)}"><span><span class="el">${esc(l)}</span> <span class="muted small">${esc((lexOf(l) || {}).ru || '')}</span></span><span class="small muted">${esc((Slovar.etimSync(l) || {}).g || '')} · ${seen[l].n} ${plural(seen[l].n, 'раз', 'раза', 'раз')}</span></button>`).join('')
       : `<p class="muted small">${items.length ? 'Ничего не найдено.' : 'Пока пусто: откройте статью долгим нажатием на слово.'}</p>`;
   };
   $('hQ').oninput = e => draw(e.target.value); draw('');
@@ -566,8 +563,8 @@ function renderHist() {
 document.addEventListener('click', e => {
   const s = e.target.closest('[data-senses]');
   if (s) { const box = inlineBox(s); if (box) showInline(box, null, b => renderSenses(s.dataset.senses, b)); else { push(curHash(), { k: 'senses', l: s.dataset.senses }); openSheet(history.state.sheet); } return; }
-  const a = e.target.closest('[data-etym]');
-  if (a) { e.stopPropagation(); openEtym(a.dataset.etym, a); }
+  const a = e.target.closest('[data-etym], [data-ety]');
+  if (a && !a.closest('.slv')) { e.stopPropagation(); openEtym(a.dataset.etym || a.dataset.ety, a); }
 });
 /* карточка слова и статья под фразой закрываются нажатием мимо них (нажатие, перерисовавшее экран, — не в счёт) */
 document.addEventListener('click', e => {
@@ -1054,7 +1051,8 @@ function renderWord(l) {
       <span class="small muted">${x.rank ? `№ ${x.rank} по частоте · ` : ''}${esc(POS_RU[x.pos] || '')}${x.pos ? ' · ' : ''}${st}</span>
       ${x.forms ? `<span class="el muted">${esc(x.forms.join(' · '))}</span>` : ''}
       ${p ? `<span class="small muted"><span class="el">${esc(TX(p))}</span><br>${esc(p.ru)}</span>` : ''}</div>
-    ${D && D.dict.senses.length ? `<div class="gl-links"><button class="link" data-senses="${esc(l)}">Значения</button>${D.etym ? `<span class="muted">·</span><button class="link" data-etym="${esc(l)}">Происхождение</button>` : ''}</div>` : ''}`;
+    ${D && D.dict.senses.length ? `<div class="gl-links"><button class="link" data-senses="${esc(l)}">Значения</button></div>` : ''}
+    ${(G.lang || 'el') === 'el' ? Slovar.etimRow(l, Slovar.etimSync(l)) : ''}`;
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-word]'); if (b) { push(curHash(), { k: 'word', l: b.dataset.word }); openSheet(history.state.sheet); } });
 
@@ -1428,5 +1426,7 @@ if (!history.state || history.state.d === undefined) {
   if (MODES.includes(t.v)) push(t.id + '-' + t.v);
 }
 applyLoc(true);
-EK.sync();  /* подтянуть с сервера то, что изменилось на других устройствах */
+EK.sync();
+/* статьи о происхождении — в фоне: строка «Происхождение ›» в карточке слова и долгое нажатие без ожидания (≈ 1,7 МБ один раз) */
+if (LIB.some(m => (m.lang || 'el') === 'el')) setTimeout(() => Slovar.etimLoad().catch(e => console.warn('этимология:', e)), 1500);  /* подтянуть с сервера то, что изменилось на других устройствах */
 

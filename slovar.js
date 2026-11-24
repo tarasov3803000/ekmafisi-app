@@ -15,6 +15,8 @@
    Звук слова и примера: голос Azure — озвученный заранее (el/zvuk-slov/<голос>/<a>.mp4, el/zvuk-prim/<голос>/<a>.mp4),
    иначе по запросу через функцию golos (el/zvuk-zapros/<голос>/<sha16>.mp3); всё — в кэш при первом нажатии.
    Нет сети, предел месяца или отказ — голос телефона el-GR.
+   Происхождение слова: el/etim.json → el/etim-<отп>.txt.gz (tools/etim_telefon.py) — свой файл и кэш; в статье — строка
+   «Происхождение ›», долгое нажатие на слово — его статья (#<лемма>/etym). Экмафиси берёт то же: etimLoad, etimHtml, etimRow.
    Хост даёт: EK.remote(путь) → fetch-ответ из хранилища; переходы — onPick(lemma) и onBack(); показ — api.show(lemma | null). */
 (() => {
   const CACHE = 'ekmafisi-slovar-v1', ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = 'el/slovar2.json', RECENT = 'ekmafisi.slovar.nedavno';
@@ -186,6 +188,104 @@
   }
   const tbSync = l => { const i = tbPart(l); return TB.has(i) ? (TB.get(i)[l] || null) : undefined; };
   async function tbVse() { for (let i = 0; i < (D.ptr.tablicyN || 0); i++) await tbGz(i); }
+
+  /* --- происхождение слова (tools/etim_telefon.py, решение 24.11.2026): el/etim.json → el/etim-<отп>.txt.gz, строки
+     «лемма \t JSON». Отдельно от словаря: свой указатель, свой кэш, качается целиком один раз (≈ 1,7 МБ), без сети работает.
+     Открытие — пробег по байтам за строками (лемма → [начало, конец]), статья разбирается, когда открыта.
+     Новая версия — как у словаря: при первом обращении, при возврате в приложение (не чаще раза в 5 минут); подменяет сразу.
+     Экмафиси зовёт etimLoad() сам, без словаря: строке «Происхождение ›» в карточке слова словарь на 24 МБ не нужен. */
+  const ECACHE = 'ekmafisi-etim-v1', EPTR = 'el/etim.json';
+  let E = null, eLoading = null, eChecking = null, eChecked = 0, eListen = false;
+  function eRazobrat(buf, p) {
+    const u8 = new Uint8Array(buf), ix = new Map(), bx = new Map();
+    for (let a = 0, i = 0; i < u8.length; i++) if (u8[i] === 10) {
+      let t = a; while (t < i && u8[t] !== 9) t++;
+      const l = dec.decode(u8.subarray(a, t)); ix.set(l, [t + 1, i]);
+      const b = gr(l); if (!bx.has(b)) bx.set(b, l);
+      a = i + 1;
+    }
+    return { p, u8, ix, bx, art: new Map() };
+  }
+  async function eOtkryt(c, p) { const r = await fayl(c, p.etim); return eRazobrat(await r.arrayBuffer(), p); }
+  async function eUborka(c, p) { for (const r of await c.keys()) if (r.url !== ckey(EPTR) && r.url !== ckey(raspak(p.etim))) c.delete(r); }
+  function etimLoad() {
+    if (E) return Promise.resolve(E);
+    return eLoading || (eLoading = (async () => {
+      const c = await caches.open(ECACHE), hit = await c.match(ckey(EPTR));
+      let p = hit ? await hit.json() : null;
+      if (!p) {
+        if (!navigator.onLine) throw new Error('Статьи о происхождении ещё не загружались на этот телефон — откройте один раз со связью.');
+        const r = await EK.remote(EPTR); if (!r.ok) throw new Error('Статьи о происхождении не загрузились.');
+        p = await r.json();
+      }
+      E = await eOtkryt(c, p);
+      if (!hit) await c.put(ckey(EPTR), new Response(JSON.stringify(p)));  /* указатель — в кэш, когда файл уже там */
+      eUborka(c, p);
+      if (!hit) eChecked = Date.now(); else if (navigator.onLine) etimCheck(true);
+      if (!eListen) { eListen = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') etimCheck(); }); }
+      return E;
+    })().catch(e => { eLoading = null; E = null; throw e; }));
+  }
+  function etimCheck(sejchas) {
+    if (!E || eChecking || !navigator.onLine || (!sejchas && Date.now() - eChecked < 5 * 60e3)) return eChecking;
+    return eChecking = (async () => {
+      try {
+        const r = await EK.remote(EPTR); if (!r.ok) return;
+        const n = await r.json(); eChecked = Date.now();
+        if (n.etim === E.p.etim) return;
+        const c = await caches.open(ECACHE), e = await eOtkryt(c, n);
+        await c.put(ckey(EPTR), new Response(JSON.stringify(n)));
+        E = e; await eUborka(c, n);
+        console.info('slovar: новые статьи о происхождении —', n.etim, `(${n.n})`);
+        window.dispatchEvent(new Event('etim-novoe'));
+      } catch (e) { console.warn('slovar: обновление этимологии', e); } finally { eChecking = null; }
+    })();
+  }
+  const eLemma = l => !E || !l ? null : E.ix.has(l) ? l : E.ix.has(l.normalize('NFC')) ? l.normalize('NFC') : null;
+  function etimSync(l) {  /* статья или null (нет); undefined — файл ещё не открыт */
+    if (!E) return undefined;
+    const k = eLemma(l); if (!k) return null;
+    if (E.art.has(k)) return E.art.get(k);
+    const [a, b] = E.ix.get(k), x = JSON.parse(dec.decode(E.u8.subarray(a, b)));
+    if (E.art.size > 50) E.art.delete(E.art.keys().next().value);
+    E.art.set(k, x); return x;
+  }
+  const etim = l => etimLoad().then(() => etimSync(l));
+  /* слово из статьи → лемма, у которой есть своя статья: точно, иначе без ударений («στολ(ίζω)» → στολίζω) */
+  const eSsylka = w => { if (!E) return null; const k = eLemma(w); return k || E.bx.get(gr(w)) || null; };
+
+  /* вид статьи — оформление, одобренное 18.11.2026 (страница-образец, docs/etimologiya.md «Оформление»): тёплый фон, белая
+     карточка, слово и главный абзац — Literata, подписи блоков — мелкими прописными, достоверность — цветной пилюлей,
+     другая версия — тёплая плашка с полосой слева, зацепка — голубая. Пустой блок не выводится.
+     Греческое слово, у которого есть своя статья, — ссылка data-ety (хозяин открывает её статью). */
+  const ECONF = { 'высокая': 'hi', 'средняя': 'mid', 'спорно': 'lo' };
+  const GRWS = /[\u0370-\u03ff\u1f00-\u1fff]+(?:\([\u0370-\u03ff\u1f00-\u1fff]+\)[\u0370-\u03ff\u1f00-\u1fff]*)?/g;  /* и «στολ(ίζω)» — одним словом */
+  function eSlova(t, own) {
+    /* часть слова («κειμ-», «-ήλιος») — не ссылка: суффикс -ήλιος не слово ήλιος «солнце» */
+    return esc(t).replace(GRWS, (w, i, s) => { const k = s[i - 1] !== '-' && s[i + w.length] !== '-' && eSsylka(w.replace(/[()]/g, '')); return k && k !== own ? `<span class="ety-w" data-ety="${esc(k)}">${w}</span>` : `<span lang="el">${w}</span>`; });
+  }
+  function eIst(s) {  /* «en.wiktionary: στολίζω (Greek)» → ссылка на статью Викисловаря */
+    const m = s.match(/^(en|el)\.wiktionary: (.+?)(?: \([^)]*\))?$/);
+    if (!m) return `<li>${/^ru\.wiktionary/.test(s) ? 'ru.wiktionary — русские статьи, где упомянуто слово' : esc(s)}</li>`;
+    return `<li><a href="https://${m[1]}.wiktionary.org/wiki/${encodeURIComponent(m[2])}" target="_blank" rel="noopener">${esc(s)}</a></li>`;
+  }
+  function etimHtml(l, e, slovo) {  /* slovo — заголовок, когда статьи нет (слово с артиклем из словаря) */
+    if (!e) return `<article class="ety"><header class="ety-shapka"><h2 lang="el">${esc(slovo || l)}</h2></header><p class="ety-net">Статьи пока нет.</p></article>`;
+    const sec = (t, body) => body ? `<section><h3>${t}</h3>${body}</section>` : '';
+    return `<article class="ety"><header class="ety-shapka"><h2 lang="el">${esc(e.s || l)}</h2>
+        ${e.z ? `<p class="ety-znach">${e.p ? `<span class="ety-pos">${esc(e.p)}</span> ` : ''}${esc(e.z)}</p>` : ''}
+        ${e.d ? `<span class="ety-conf ${ECONF[e.d] || 'mid'}">достоверность: ${esc(e.d)}</span>` : ''}</header>
+      ${e.r ? `<p class="ety-razbor">${eSlova(e.r, l)}</p>` : ''}
+      ${e.a ? `<p class="ety-alt">${eSlova(e.a, l)}</p>` : ''}
+      ${sec('Семья в греческом', e.f && `<ul class="ety-fam">${e.f.map(([w, ru]) => `<li>${eSlova(w, l)}${ru ? ' — ' + esc(ru) : ''}</li>`).join('')}</ul>`)}
+      ${sec('В русском, английском, латыни', e.v && `<ul class="ety-fam">${e.v.map(([w, lg, n]) => `<li><b>${esc(w)}</b> <span class="ety-lng">${esc([lg, n].filter(Boolean).join(', '))}</span></li>`).join('')}</ul>`)}
+      ${sec('В церковном языке', e.c && `<p>${eSlova(e.c, l)}</p>`)}
+      ${e.h ? `<aside class="ety-hook"><h3>Зацепка</h3><p>${eSlova(e.h, l)}</p></aside>` : ''}
+      <details class="ety-ist"><summary>Источники</summary>${e.i ? `<ol>${e.i.map(eIst).join('')}</ol>` : ''}
+        <p>Написано ИИ (Claude) по материалам Викисловаря (CC BY-SA) и проверено кодом; человеком не проверено.</p></details></article>`;
+  }
+  /* строка «Происхождение ›» с выжимкой — в статье словаря и в карточке слова Экмафиси */
+  const etimRow = (l, e) => e && e.g ? `<button class="ety-row" data-ety="${esc(l)}"><span class="k">Происхождение ›</span><span class="g">${esc(e.g)}</span></button>` : '';
 
   /* --- поиск: двоичный по ключам-байтам UTF-8 (порядок байтов = порядок, в котором их сложил tools/slovar_telefon.py) --- */
   function cmp(ix, j, q) {  /* ключ j против запроса q (байты) */
@@ -416,6 +516,43 @@
 .slv-ph div { font-size: calc(15px + var(--up, 0px)); }
 .slv-ph .e { font: calc(16px + var(--up, 0px)) var(--f-el); }
 .slv-forms { font: calc(16px + var(--up, 0px))/1.5 var(--f-el); color: var(--muted); }
+/* --- происхождение: токены страницы-образца (одобрено 18.11.2026), свои имена --ety-*, тёмная тема — те же роли --- */
+:root { --ety-bg: #f7f6f2; --ety-card: #ffffff; --ety-fg: #1f2124; --ety-mut: #686b70; --ety-line: #e2e0d9; --ety-acc: #2c5f7c;
+  --ety-alt: #fbf3e2; --ety-alt-line: #e3c98d; --ety-hook: #eaf1f4; --ety-ok: #2f7a4b; --ety-mid: #9a6a10; --ety-lo: #a3402f;
+  --ety-disp: "Literata", Georgia, "Times New Roman", serif; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ety-bg: #17191b; --ety-card: #1f2225; --ety-fg: #e8e7e3;
+  --ety-mut: #9da1a6; --ety-line: #34383c; --ety-acc: #8cc1dc; --ety-alt: #2b2518; --ety-alt-line: #6e5a2c; --ety-hook: #1d2a31;
+  --ety-ok: #7fcf9b; --ety-mid: #e2b45b; --ety-lo: #ef8f7d; } }
+:root[data-theme="dark"] { --ety-bg: #17191b; --ety-card: #1f2225; --ety-fg: #e8e7e3; --ety-mut: #9da1a6; --ety-line: #34383c;
+  --ety-acc: #8cc1dc; --ety-alt: #2b2518; --ety-alt-line: #6e5a2c; --ety-hook: #1d2a31; --ety-ok: #7fcf9b; --ety-mid: #e2b45b; --ety-lo: #ef8f7d; }
+html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
+.ety { background: var(--ety-card); color: var(--ety-fg); border: 1px solid var(--ety-line); border-radius: 10px; padding: 18px 18px 14px;
+  display: grid; gap: 14px; min-width: 0; overflow-wrap: break-word; font-size: calc(16px + var(--up, 0px)); line-height: 1.6; text-align: left; }
+.ety p, .ety ul, .ety ol { margin: 0; }
+.ety-shapka { display: grid; gap: 4px; }
+.ety h2 { font: 600 calc(32px + var(--up, 0px))/1.1 var(--ety-disp); margin: 0; letter-spacing: 0; text-transform: none; color: var(--ety-fg); }
+.ety-pos { color: var(--ety-mut); font-size: .9em; margin-right: 4px; }
+.ety h3 { font: 600 calc(11.5px + var(--up, 0px))/1.3 var(--f-ui, system-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ety-mut); margin: 0 0 6px; }
+.ety-conf { justify-self: start; font-size: calc(12.5px + var(--up, 0px)); padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.ety-conf.hi { color: var(--ety-ok); } .ety-conf.mid { color: var(--ety-mid); } .ety-conf.lo { color: var(--ety-lo); }
+.ety-razbor { font: 400 calc(17px + var(--up, 0px))/1.6 var(--ety-disp); }
+.ety-alt { font-size: .95em; background: var(--ety-alt); border-left: 3px solid var(--ety-alt-line); padding: 6px 10px; border-radius: 0 6px 6px 0; }
+.ety-fam { padding-left: 1.1em; columns: 2; column-gap: 24px; } .ety-fam li { break-inside: avoid; }
+@media (max-width: 520px) { .ety-fam { columns: 1; } }
+.ety-lng { color: var(--ety-mut); font-size: .88em; }
+.ety-hook { background: var(--ety-hook); border-radius: 8px; padding: 10px 12px; }
+.ety-ist { font-size: .88em; color: var(--ety-mut); } .ety-ist summary { cursor: pointer; }
+.ety-ist ol { margin: 6px 0 0; padding-left: 1.4em; overflow-wrap: anywhere; } .ety-ist p { margin-top: 6px; } .ety a { color: var(--ety-acc); }
+.ety-net { color: var(--ety-mut); }
+.ety [lang="el"], .ety-w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.ety-w { color: var(--ety-acc); cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
+.ety-w:active, .ety-w.on { background: var(--ety-hook); }
+/* строка «Происхождение ›» с выжимкой: в статье словаря и в карточке слова Экмафиси */
+.ety-row { display: grid; gap: 2px; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); padding: 10px 0 0; font: inherit; cursor: pointer; }
+.ety-row .k { color: var(--accent); font-weight: 600; font-size: calc(15px + var(--up, 0px)); }
+.ety-row .g { font: calc(15px + var(--up, 0px))/1.45 var(--f-el); color: var(--muted); }
+.slv-art.ety-on { background: none; border: 0; padding: 0; }
+.slv-w.hold, .slv-head h1.hold, .slv-list button.hold, .ety-w.hold { background: var(--accent-soft); }
 `;
   const ANDROID = /android/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent);
   const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
@@ -471,8 +608,11 @@
   }
   const rowHtml = r => `<button data-l="${esc(r.l)}"><span class="w" lang="el">${esc(r.s)}</span><span class="t">${esc(r.b)}</span></button>`;
   const rowOf = i => { const r = row(i); return { l: r.l, s: r.s, b: brief(r.z) }; };
+  /* вид — сразу при загрузке модуля: статья о происхождении и строка «Происхождение ›» нужны Экмафиси и без экрана «Словарь» */
+  const css = () => { if (!document.getElementById('slv-css')) { const st = document.createElement('style'); st.id = 'slv-css'; st.textContent = CSS; document.head.appendChild(st); } };
+  css();
   function mount(root, opts) {
-    if (!document.getElementById('slv-css')) { const st = document.createElement('style'); st.id = 'slv-css'; st.textContent = CSS; document.head.appendChild(st); }
+    css();
     /* поле без подсказок: нестандартное name/id, autocomplete/autocorrect выкл. — Chrome не подставляет прошлые вводы, клавиатура не правит */
     root.innerHTML = `<div class="slv${ANDROID ? ' android' : ''}">
       <div class="slv-row"><input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="Греческое или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other"></div>
@@ -511,7 +651,7 @@
     window.addEventListener('slovar-novoe', () => { status(); if (!cur) { if (q.value.trim()) { res = search(q.value); drawList(); } else drawList(); } });
     let t = 0;
     q.addEventListener('input', () => {
-      if (cur) { cur = null; curS = null; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
+      if (cur) { cur = null; curS = null; showTok++; etyPage(false); art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
       clearTimeout(t); t = setTimeout(run, 120);
     });
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && res.length) { q.blur(); pick(row(res[0]).l); } });
@@ -539,9 +679,32 @@
     ['pointerup', 'pointercancel'].forEach(ev => art.addEventListener(ev, () => clearTimeout(lp)));  /* прокрутка пальцем — pointercancel */
     art.addEventListener('contextmenu', e => { if (e.target.closest('[data-tip]')) e.preventDefault(); });
 
+    /* долгое нажатие на слово (≈ 450 мс) — сразу его статья о происхождении (решение 5.11.2026, как в Экмафиси): заголовок
+       статьи, греческое слово примера или выражения, строка списка; обычное нажатие — как прежде. Палец сдвинулся — не в счёт */
+    let wl = null;
+    const wLemma = el => el.matches('.slv-list button') ? el.dataset.l : el.matches('h1') ? cur : el.matches('.ety-w') ? el.dataset.ety : slovoLemma(el.textContent);
+    root.addEventListener('pointerdown', e => {
+      const el = e.target.closest('.slv-w, .slv-head h1, .slv-list button[data-l], .ety-w'); if (!el || e.button > 0) return;
+      el.classList.add('hold');
+      wl = { el, x: e.clientX, y: e.clientY, fired: false, t: setTimeout(() => {
+        wl.fired = true; el.classList.remove('hold');
+        const l = wLemma(el); if (l && !(l === cur && mode === 'etym')) pick(l, 'etym');
+      }, 450) };
+    });
+    const wlCancel = () => {  /* после сработавшего — глотаем ближайший click (на телефоне его может и не быть) */
+      if (!wl) return; clearTimeout(wl.t); wl.el.classList.remove('hold');
+      if (!wl.fired) wl = null; else { const w0 = wl; setTimeout(() => { if (wl === w0) wl = null; }, 400); }
+    };
+    root.addEventListener('pointermove', e => { if (wl && !wl.fired && Math.hypot(e.clientX - wl.x, e.clientY - wl.y) > 10) wlCancel(); });
+    ['pointerup', 'pointercancel'].forEach(ev => root.addEventListener(ev, wlCancel));
+    root.addEventListener('click', e => { if (wl && wl.fired) { e.stopPropagation(); e.preventDefault(); wl = null; } }, true);
+    root.addEventListener('contextmenu', e => { if (e.target.closest('.slv-w, .slv-head h1, .slv-list button, .ety-w')) e.preventDefault(); });
+
     art.addEventListener('click', e => {
       if (lpDone && e.target.closest('[data-tip]')) { lpDone = false; return; }
       if (e.target.closest('.slv-back')) { opts.onBack ? opts.onBack() : api.show(null); return; }
+      const ey = e.target.closest('[data-ety]');
+      if (ey) { e.stopPropagation(); ey.classList.add('on'); setTimeout(() => pick(ey.dataset.ety, 'etym'), 90); return; }  /* строка «Происхождение ›» и слова статьи */
       const lk = e.target.closest('.slv-link'); if (lk) { pick(lk.dataset.l); return; }
       const sw = e.target.closest('.slv-w');
       if (sw) {  /* слово примера → его статья; не нашлось или это та же статья — ничего */
@@ -558,8 +721,21 @@
       if (x) { const ex = s.z[+x.dataset.z].ex[+x.dataset.x]; play(sayText(ex.el), ex.a && D.zvukP ? D.zvukP + ex.a + '.mp4' : null, x); }
     });
 
+    const etyPage = on => document.documentElement.classList.toggle('ety-page', !!on);
     function article(l, m, s) {
       curS = s;
+      art.classList.toggle('ety-on', m === 'etym'); etyPage(m === 'etym');
+      if (m === 'etym') {  /* статья о происхождении — отдельным экраном той же статьи: «←» — к статье словаря */
+        mode = 'etym';
+        const draw = e => { art.innerHTML = `<button class="slv-back">← ${esc(s.s)}</button>` + etimHtml(l, e, s.s); };
+        const e0 = etimSync(l);
+        if (e0 !== undefined) draw(e0);
+        else {
+          art.innerHTML = `<button class="slv-back">← ${esc(s.s)}</button><p class="slv-tbwait">Открываю статьи о происхождении…</p>`;
+          etim(l).then(e => cur === l && mode === 'etym' && draw(e), e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = e.message; });
+        }
+        return;
+      }
       const tab = m === 'tab' && s.tb;
       const tbBtn = s.tb ? (tab ? `<button class="slv-tbbtn on" aria-label="Статья" title="Статья" data-tip="Статья">${ARTI}</button>`
         : `<button class="slv-tbbtn" aria-label="${tbName(s)}" title="${tbName(s)}" data-tip="${tbName(s)}">${TBI}</button>`) : '';
@@ -582,7 +758,10 @@
         `<li><span class="e" lang="el">${slova(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
       if (s.f) h += '<h2>Выражения</h2><div class="slv-ph">' + s.f.map(x => `<div><span class="e" lang="el">${slova(x.el)}</span> — ${esc(x.ru)}</div>`).join('') + '</div>';
       if (s.c && s.c.length && !s.tb) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
+      const e0 = etimSync(l);  /* «Происхождение ›» с выжимкой; файл ещё открывается — строка встанет, когда откроется */
+      h += `<div class="slv-ety">${e0 ? etimRow(l, e0) : ''}</div>`;
       art.innerHTML = h;
+      if (e0 === undefined) etim(l).then(e => { const b = cur === l && mode === null && art.querySelector('.slv-ety'); if (b && e) b.innerHTML = etimRow(l, e); }).catch(() => {});
       fitHead(art.querySelector('.slv-head'), art);  /* до отрисовки: страница ни на миг не шире экрана */
       requestAnimationFrame(() => fitMeta(art.querySelector('.slv-meta')));
       const rec = (readJ(RECENT2) || []).filter(x => x.l !== l); rec.unshift({ l, s: s.s, b: brief(s.z.map(z => z.ru)) });
@@ -602,7 +781,7 @@
           if (cur && !was) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
           if (cur && was && was !== cur) artY.set(was, y);  /* из статьи в статью (слово примера) */
           art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
-          if (!cur) drawList();
+          if (!cur) { drawList(); art.classList.remove('ety-on'); etyPage(false); }
           if (cur) {
             refit();
             const ay = was !== cur && artY.has(cur) ? artY.get(cur) : 0; artY.delete(cur);
@@ -624,10 +803,11 @@
     drawList();
     const bar = $('.slv-bar'), slow = setTimeout(() => { if (!D) st.textContent = 'Открываю словарь…'; }, 400);  /* из кэша — доли секунды, надпись не мелькает */
     api.ready = load(f => { bar.classList.remove('hidden'); bar.firstElementChild.style.width = Math.min(100, f * 100).toFixed(0) + '%'; st.textContent = `Загружаю словарь — один раз, дальше без сети · ${Math.min(99, Math.round(f * 100))} %`; })
-      .then(() => { clearTimeout(slow); bar.classList.add('hidden'); status(); if (q.value.trim()) run(); api.show(want, wantM); })
+      .then(() => { clearTimeout(slow); bar.classList.add('hidden'); status(); if (q.value.trim()) run(); api.show(want, wantM); etimLoad().catch(e => console.warn('slovar: этимология', e)); })
       .catch(e => { clearTimeout(slow); bar.classList.add('hidden'); st.textContent = e.message || String(e); });
     return api;
   }
 
-  window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true) };
+  window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true),
+    etimLoad, etim, etimSync, etimHtml, etimRow, etimProverit: () => etimCheck(true) };
 })();
