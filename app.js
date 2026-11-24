@@ -242,7 +242,7 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
 function parseHash(h) {
   if (['settings', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
   if (h === 'slovar' || h.startsWith('slovar/')) {  /* #slovar/<лемма>[/tab|/etym] — статья, её таблицы или происхождение */
-    const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.match(/\/(tab|etym)$/);
+    const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.match(/\/(tab|etym|hist)$/);
     return { v: 'slovar', l: m ? r.slice(0, -m[0].length) : r, m: m ? m[1] : null };
   }
   for (const v of MODES) if (h.endsWith('-' + v)) { const id = h.slice(0, -v.length - 1); if (LIB.some(m => m.id === id)) return { v, id }; }
@@ -548,8 +548,8 @@ function renderEtym(l, inl) {
 function renderHist() {
   $('eTtl').textContent = 'История';
   const log = read(EKEY) || [], seen = {};
-  log.forEach(x => { seen[x.l] = seen[x.l] || { n: 0, t: '' }; seen[x.l].n++; seen[x.l].t = x.t; });
-  const items = Object.keys(seen).sort((a, b) => seen[b].t.localeCompare(seen[a].t));
+  log.forEach((x, i) => { seen[x.l] = seen[x.l] || { n: 0, t: '', i: 0 }; seen[x.l].n++; if (x.t >= seen[x.l].t) { seen[x.l].t = x.t; seen[x.l].i = i; } });
+  const items = Object.keys(seen).sort((a, b) => seen[b].t.localeCompare(seen[a].t) || seen[b].i - seen[a].i);  /* время — до минуты: в одну минуту — по порядку записи */
   $('eBody').innerHTML = `<div class="hist" style="display:grid;gap:8px"><input id="hQ" type="search" placeholder="Поиск" autocomplete="off"><div id="hList"></div></div>`;
   const draw = q => {
     const qq = base(q || '');

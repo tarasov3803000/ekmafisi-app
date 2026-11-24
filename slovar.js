@@ -285,7 +285,25 @@
         <p>Написано ИИ (Claude) по материалам Викисловаря (CC BY-SA) и проверено кодом; человеком не проверено.</p></details></article>`;
   }
   /* строка «Происхождение ›» с выжимкой — в статье словаря и в карточке слова Экмафиси */
-  const etimRow = (l, e) => e && e.g ? `<button class="ety-row" data-ety="${esc(l)}"><span class="k">Происхождение ›</span><span class="g">${esc(e.g)}</span></button>` : '';
+  /* история просмотров статей о происхождении — общая с Экмафиси: тот же адрес github.io — то же хранилище, ключ ekmafisi.<id>.etym,
+     строки { id, l, t } (app/app.js, openEtym). На сервер — очередью EK.queueLog: её отправляет Экмафиси при синхронизации
+     («Словарь» синхронизацию не ведёт), а чужие устройства приходят в эту историю тоже через Экмафиси */
+  const ekey = () => window.EK && EK.uid ? 'ekmafisi.' + EK.uid + '.etym' : null;
+  const uuid = () => crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+  function etimZapis(l) {
+    const k = ekey(); if (!k || !l) return;
+    const id = uuid(), at = new Date().toISOString(), log = readJ(k) || [];
+    log.push({ id, l, t: at.slice(0, 16) });
+    try { localStorage.setItem(k, JSON.stringify(log)); } catch (e) {}
+    if (EK.queueLog) EK.queueLog({ id, at, kind: 'etym', lang: 'el', lemma: l });
+  }
+  function etimIstoriya() {  /* [{ l, n, t }] — последние сверху */
+    const seen = new Map();
+    (readJ(ekey()) || []).forEach((x, i) => { const s = seen.get(x.l) || { l: x.l, n: 0, t: '', i: 0 }; s.n++; if (x.t >= s.t) { s.t = x.t; s.i = i; } seen.set(x.l, s); });
+    return [...seen.values()].sort((a, b) => b.t.localeCompare(a.t) || b.i - a.i);  /* время — до минуты: в одну минуту — по порядку записи */
+  }
+  const raz = n => n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'раза' : 'раз';
+  const etimRow = (l, e) => e && e.g ?`<button class="ety-row" data-ety="${esc(l)}"><span class="k">Происхождение ›</span><span class="g">${esc(e.g)}</span></button>` : '';
 
   /* --- поиск: двоичный по ключам-байтам UTF-8 (порядок байтов = порядок, в котором их сложил tools/slovar_telefon.py) --- */
   function cmp(ix, j, q) {  /* ключ j против запроса q (байты) */
@@ -440,6 +458,17 @@
 .slv-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .slv-back { justify-self: start; border: 0; background: none; color: var(--accent); font: 600 calc(15px + var(--up, 0px)) var(--f-ui); padding: 0; cursor: pointer; }
 .slv-row { display: flex; gap: 8px; align-items: center; }
+.slv-etytop { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.slv-etytop .slv-hist { margin-left: auto; border: 0; background: none; color: var(--muted); padding: 8px; margin-right: -8px; display: inline-flex; border-radius: 10px; cursor: pointer; }
+.slv-etytop .slv-hist svg { width: 22px; height: 22px; }
+.slv-hh { margin: 0; font: 700 calc(20px + var(--up, 0px))/1.2 var(--f-ui); }
+.slv-art .slv-hl { border: 0; border-radius: 0; background: none; }
+.slv-hl button { padding: 10px 0; }
+.slv-hl button:first-child { border-top: 0; }
+.slv-hl .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slv-hl .w .r { font: calc(15px + var(--up, 0px)) var(--f-ui); color: var(--muted); }
+.slv-hl .t { white-space: normal; }
+.slv-hl p { margin: 0; padding: 12px 14px; color: var(--muted); }
 .slv-row .slv-q { flex: 1; min-width: 0; }
 /* заголовок — всегда одна строка (решение 16.11.2026): слово с артиклями, значок таблиц и 🔊. Значки — в em от строки;
    кегль слова растёт с масштабом, пока влезает, дальше его ужимает fitHead — не мельче основного текста.
@@ -572,6 +601,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
     }
     return h + '</div>';
   }
+  const CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
   const FR = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1.5" y="9" width="3" height="5.5" rx="1"/><rect x="6.5" y="5.5" width="3" height="9" rx="1"/><rect x="11.5" y="2" width="3" height="12.5" rx="1"/></svg>';
   const POS = [['глагол', 'v'], ['сущ', 'n'], ['прил', 'a'], ['нареч', 'd'], ['местоим', 'p'], ['предлог', 'r'], ['союз', 'c'], ['частица', 'q'],
     ['числит', 'm'], ['порядк', 'm'], ['артикль', 't'], ['межд', 'i'], ['прич', 'pp']];
@@ -623,7 +653,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
     if (opts.aside) root.querySelector('.slv-row').appendChild(opts.aside);  /* шестерёнка приложения — в строку поиска, справа */
     const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
     const artY = new Map();  /* статья → прокрутка, когда ушли из неё в другую: «назад» — на то же место */
-    let res = [], shown = 100, cur = null, curS = null, want = null, listY = 0, mode = null, wantM = null, showTok = 0;
+    let res = [], shown = 100, cur = null, curS = null, want = null, listY = 0, mode = null, wantM = null, showTok = 0, hist = false;  /* hist — открыта история просмотров */
     /* шрифт сменили, экран повернули, шрифт догрузился — заголовок и строку под ним заново */
     const refit = () => { if (cur) { fitHead(art.querySelector('.slv-head'), art); fitMeta(art.querySelector('.slv-meta')); } };
     if (window.ResizeObserver) new ResizeObserver(refit).observe($('.slv-row')); else addEventListener('resize', refit);  /* строка поиска меняется с шириной и шрифтом, но не от подбора кегля */
@@ -651,7 +681,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
     window.addEventListener('slovar-novoe', () => { status(); if (!cur) { if (q.value.trim()) { res = search(q.value); drawList(); } else drawList(); } });
     let t = 0;
     q.addEventListener('input', () => {
-      if (cur) { cur = null; curS = null; showTok++; etyPage(false); art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
+      if (cur || hist) { cur = null; curS = null; hist = false; showTok++; etyPage(false); art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
       clearTimeout(t); t = setTimeout(run, 120);
     });
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && res.length) { q.blur(); pick(row(res[0]).l); } });
@@ -660,7 +690,10 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
       if (b.dataset.more) { shown += 100; drawList(); return; }
       pick(b.dataset.l);
     });
-    const pick = (l, m) => opts.onPick ? opts.onPick(l, m) : api.show(l, m);
+    const pick = (l, m) => {
+      if (m === 'etym' && etimSync(l) !== null) etimZapis(l);  /* в историю — каждое открытие статьи, как в Экмафиси; статьи нет — не пишется */
+      opts.onPick ? opts.onPick(l, m) : api.show(l, m);
+    };
 
     /* долгое нажатие на значок — подсказка словом (title на телефоне не виден); отпустил — нажатие не срабатывает */
     let lp = 0, lpDone = false, tipT = 0;
@@ -703,6 +736,8 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
     art.addEventListener('click', e => {
       if (lpDone && e.target.closest('[data-tip]')) { lpDone = false; return; }
       if (e.target.closest('.slv-back')) { opts.onBack ? opts.onBack() : api.show(null); return; }
+      if (e.target.closest('.slv-hist')) { pick('', 'hist'); return; }
+      const hb = e.target.closest('.slv-hl button[data-l]'); if (hb) { hb.classList.add('on'); pick(hb.dataset.l, 'etym'); return; }
       const ey = e.target.closest('[data-ety]');
       if (ey) { e.stopPropagation(); ey.classList.add('on'); setTimeout(() => pick(ey.dataset.ety, 'etym'), 90); return; }  /* строка «Происхождение ›» и слова статьи */
       const lk = e.target.closest('.slv-link'); if (lk) { pick(lk.dataset.l); return; }
@@ -727,11 +762,12 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
       art.classList.toggle('ety-on', m === 'etym'); etyPage(m === 'etym');
       if (m === 'etym') {  /* статья о происхождении — отдельным экраном той же статьи: «←» — к статье словаря */
         mode = 'etym';
-        const draw = e => { art.innerHTML = `<button class="slv-back">← ${esc(s.s)}</button>` + etimHtml(l, e, s.s); };
+        const top = `<div class="slv-etytop"><button class="slv-back">← ${esc(s.s)}</button><button class="slv-hist" aria-label="История просмотров" data-tip="История просмотров">${CLOCK}</button></div>`;
+        const draw = e => { art.innerHTML = top + etimHtml(l, e, s.s); };
         const e0 = etimSync(l);
         if (e0 !== undefined) draw(e0);
         else {
-          art.innerHTML = `<button class="slv-back">← ${esc(s.s)}</button><p class="slv-tbwait">Открываю статьи о происхождении…</p>`;
+          art.innerHTML = top + '<p class="slv-tbwait">Открываю статьи о происхождении…</p>';
           etim(l).then(e => cur === l && mode === 'etym' && draw(e), e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = e.message; });
         }
         return;
@@ -769,8 +805,37 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
       try { localStorage.setItem(RECENT2, JSON.stringify(rec.slice(0, 30))); } catch (e) {}
     }
 
+    /* история просмотров статей о происхождении (etimIstoriya): последние сверху, слово и значения, выжимка, сколько раз; поиск сверху.
+       Адрес #/hist (в Экмафиси #slovar//hist); нажатие на строку — статья о происхождении */
+    function istoriya() {
+      const was = cur, y = window.scrollY;
+      if (was) artY.set(was, y); else if (!hist) listY = y;
+      showTok++; want = null; wantM = 'hist'; cur = null; curS = null; mode = 'hist'; hist = true;
+      art.classList.remove('ety-on'); etyPage(false);
+      art.innerHTML = `<button class="slv-back">← назад</button><h2 class="slv-hh">История просмотров</h2>
+        <input class="slv-q slv-hq" type="search" placeholder="Поиск в истории" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Поиск в истории" data-lpignore="true" data-form-type="other">
+        <div class="slv-list slv-hl"></div>`;
+      art.classList.remove('hidden'); list.classList.add('hidden'); st.classList.add('hidden');
+      const hq = art.querySelector('.slv-hq'), box = art.querySelector('.slv-hl'), items = etimIstoriya();
+      const draw = () => {
+        if (!hist) return;
+        const v = hq.value.trim(), g = gr(v), r = ru(v);
+        const rows = items.map(x => Object.assign({ e: etimSync(x.l) || null }, x))
+          .filter(x => !v || gr(x.l).includes(g) || (x.e && (gr(x.e.s || '').includes(g) || ru(x.e.z || '').includes(r))));
+        box.innerHTML = rows.length ? rows.map(x => `<button data-l="${esc(x.l)}"><span class="w"><span lang="el">${esc((x.e && x.e.s) || x.l)}</span>${x.e && x.e.z ? ` <span class="r">${esc(x.e.z.split(';')[0])}</span>` : ''}</span>`
+          + `<span class="t">${x.e && x.e.g ? esc(x.e.g) + ' · ' : ''}${x.n} ${raz(x.n)}</span></button>`).join('')
+          : `<p>${items.length ? 'Ничего не найдено.' : 'Пока пусто: статью о происхождении открывает долгое нажатие на слово.'}</p>`;
+      };
+      hq.addEventListener('input', draw);
+      draw();
+      if (etimSync('') === undefined) etimLoad().then(draw, () => {});
+      window.scrollTo(0, 0);
+    }
+
     const api = {
-      show(l, m) {  /* l — статья; null — список; m — 'tab': таблицы этой статьи */
+      show(l, m) {
+        if (m === 'hist') return istoriya();
+        const wasH = hist; hist = false;  /* l — статья; null — список; m — 'tab': таблицы этой статьи */
         want = l; wantM = m || null;
         const tok = ++showTok, was = cur, y = window.scrollY;
         if (!D) { if (!l) drawList(); return; }  /* словарь ещё открывается: список «Недавних» уже виден, статья — когда готов */
@@ -783,7 +848,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
           if (tok !== showTok) return;  /* пока разбиралась, открыли другое */
           if (s) article(l, m, s);
           cur = s ? l : null; if (!s) curS = null;
-          if (cur && !was) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
+          if (cur && !was && !wasH) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
           if (cur && was && was !== cur) artY.set(was, y);  /* из статьи в статью (слово примера) */
           art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
           if (!cur) { drawList(); art.classList.remove('ety-on'); etyPage(false); }
@@ -793,7 +858,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
             window.scrollTo(0, ay);
             if (ay) requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, ay)));  /* поверх прокрутки браузера после popstate */
           }
-          else if (was) {  /* назад к списку — на прежнее место; запрос в поле остаётся */
+          else if (was || wasH) {  /* назад к списку — на прежнее место; запрос в поле остаётся */
             const y = listY; window.scrollTo(0, y);
             requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));  /* браузер после popstate восстанавливает свою прокрутку — поверх неё */
           }
@@ -802,7 +867,7 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
         if (i === undefined) put(null);
         else stat(i).then(put, e => { console.warn('slovar: статья', e); put(null); });
       },
-      focus() { if (!cur) q.focus({ preventScroll: true }); },
+      focus() { if (!cur && !hist) q.focus({ preventScroll: true }); },
       ready: null
     };
     drawList();
@@ -814,5 +879,5 @@ html.ety-page body, .ety-page, .sheet.ety-page { background: var(--ety-bg); }
   }
 
   window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true),
-    etimLoad, etim, etimSync, etimHtml, etimRow, etimProverit: () => etimCheck(true) };
+    etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true) };
 })();
