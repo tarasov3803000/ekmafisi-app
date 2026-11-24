@@ -1,7 +1,7 @@
 /* Экмафиси — логика приложения (из пробной страницы). Грузится из sync.js, когда вход проверен и список текстов есть:
    EK.lib — тексты, EK.uid — кто вошёл, EK.content(путь) — файл из закрытого хранилища (с кэшем), EK.queue* — отправка. */
 const LIB = EK.lib;
-const LEVELS = { A1: 1, A2: 2, B1: 3, B2: 4 };
+const LEVELS = { A1: 1, A2: 2, B1: 3, B2: 4, C1: 5, C2: 6 };
 const MODE_NAME = { skor: 'Повторение', bt: 'Обратный перевод', ves: 'Весь текст', soberi: 'Собери' };  /* ключ skor — прежнее имя «Скороговорки»: так в настройках и адресах */
 /* язык материала: текст фразы — поле t (прежние греческие материалы — el), порядок форм глагола и надписи — по языку */
 const LANGS = {
@@ -29,9 +29,13 @@ let G = Object.assign({ rate: 1, last: null, mode: 'skor', theme: 'auto', btN: 3
 if (!RATES.includes(G.rate)) G.rate = G.rate < 1 ? 0.8 : 1;
 /* настройки на сервере — по ключу { v, t }: rate, mode, theme, last, btN (фраз за раз в «Обратном переводе»); pos.<текст> — где остановился; flags — «Неверно?» */
 /* язык обучения — lang; «Продолжить» — свой у каждого языка: last.el, last.en */
-const G_SYNC = ['rate', 'mode', 'theme', 'lang', 'btN', ...Object.keys(LANGS).map(l => 'last.' + l)];
+/* lvOff.<язык> — уровни, выключенные учеником: на полке их нет (хранятся выключенные, не включённые — новый уровень появится сам) */
+const G_SYNC = ['rate', 'mode', 'theme', 'lang', 'btN', ...Object.keys(LANGS).flatMap(l => ['last.' + l, 'lvOff.' + l])];
 if (G.last) { const m0 = LIB.find(m => m.id === G.last); if (m0 && !G['last.' + m0.lang]) G['last.' + m0.lang] = G.last; delete G.last; }  /* прежний общий last */
 const lastId = () => G.lang && G['last.' + G.lang];
+const levelsOf = lang => [...new Set(LIB.filter(m => m.lang === lang).map(m => m.level))].sort((a, b) => (LEVELS[a] || 9) - (LEVELS[b] || 9));
+const lvOff = lang => G['lvOff.' + lang] || [];
+const onShelf = m => m.lang === G.lang && !lvOff(m.lang).includes(m.level);
 const TKEY = 'ekmafisi.settings.t';
 function setSynced(key, v) {  /* отправить ключ, если значение изменилось с прошлой отправки */
   const T = read(TKEY) || {};
@@ -269,7 +273,7 @@ function renderShelf() {
   /* язык не выбран — сначала выбор; выбран — на полке только его тексты */
   $('langPick').classList.toggle('hidden', !!G.lang);
   $('shelfList').classList.toggle('hidden', !G.lang);
-  $('texts').innerHTML = LIB.filter(m => m.lang === G.lang).map(m => {
+  $('texts').innerHTML = LIB.filter(onShelf).map(m => {
     const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
     const done = c.g + c.y + c.r;
     return `<button class="text${lastId() === m.id ? ' last' : ''}" data-id="${m.id}">
@@ -313,6 +317,17 @@ function renderSettings() {
   document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
   document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
   document.querySelectorAll('#setBtN button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.n === (G.btN || 3))));
+  /* уровни на полке — свои у каждого языка; последний включённый не выключается (полка не бывает пустой) */
+  const lv = G.lang ? levelsOf(G.lang) : [];
+  $('setLevelCard').classList.toggle('hidden', lv.length < 2);
+  $('setLevel').innerHTML = lv.map(l => `<button data-lv="${esc(l)}" aria-pressed="${!lvOff(G.lang).includes(l)}">${esc(l)}</button>`).join('');
+  document.querySelectorAll('#setLevel button').forEach(b => b.onclick = () => {
+    const off = lvOff(G.lang), l = b.dataset.lv;
+    if (off.includes(l)) G['lvOff.' + G.lang] = off.filter(x => x !== l);
+    else if (lv.length - off.length > 1) G['lvOff.' + G.lang] = [...off, l];
+    else return;
+    saveG(); renderSettings();
+  });
 }
 document.querySelectorAll('#setBtN button').forEach(b => b.onclick = () => { G.btN = +b.dataset.n; saveG(); renderSettings(); });
 document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
