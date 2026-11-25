@@ -130,6 +130,29 @@
     if (error) throw error;
     return data;
   };
+  /* Настройки → «Пользователи» (только у admin в allowed): список допуска с расходом, добавить человека, поправить имя.
+     В ?dev — пример, чтобы проверить вёрстку без сервера. */
+  EK.admin = false;
+  const DEV_USERS = [{ email: 'antoni@example.com', note: 'Антон', added_at: '2026-11-05T21:52:55Z', signed_in_at: '2026-11-24T22:29:51Z', ai_usd: 0.13957, golos_znaki: 293 },
+    { email: 'drug@example.com', note: null, added_at: '2026-11-25T14:56:27Z', signed_in_at: null, ai_usd: null, golos_znaki: null }];
+  EK.users = async () => {
+    if (DEV) return DEV_USERS.map(u => Object.assign({}, u));
+    const { data, error } = await sb.rpc('admin_users');
+    if (error) throw error;
+    return data;
+  };
+  EK.userPut = async (email, note) => {
+    if (DEV) { const e = email.trim().toLowerCase(), u = DEV_USERS.find(x => x.email === e); if (u) u.note = note || null; else DEV_USERS.push({ email: e, note: note || null, added_at: new Date().toISOString(), signed_in_at: null, ai_usd: null, golos_znaki: null }); return; }
+    const { error } = await sb.rpc('admin_user_put', { p_email: email, p_note: note });
+    if (error) throw error;
+  };
+  async function checkAdmin() {
+    const k = K('admin');
+    EK.admin = DEV || readJ(k) === true;
+    if (DEV || !navigator.onLine) return;
+    const { data, error } = await sb.rpc('is_admin');
+    if (!error) { EK.admin = data === true; writeJ(k, EK.admin); }
+  }
   document.addEventListener('visibilitychange', () => sync());  /* вернулся — подтянуть; ушёл — отправить */
   addEventListener('online', () => sync());
   addEventListener('offline', () => setStatus('offline'));
@@ -163,6 +186,7 @@
   async function start(u) {
     EK.uid = u.id; EK.email = u.email;
     if (ONLY_LEX) return runApp();
+    checkAdmin().catch(() => {});
     try { EK.lib = await loadLibrary(); }
     catch (e) {
       console.warn('library', e);

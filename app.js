@@ -324,7 +324,40 @@ $('resume').onclick = () => { if (G.lang === 'el' && G.mode === 'soberi') { push
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
 /* --- настройки: всё, что не учёба — язык, тема, учётная запись, итог --- */
 $('setOpen').onclick = () => { push('settings'); show('settings'); };
+/* Настройки → «Пользователи» (только Антону, EK.admin): список подгружается, когда карточку раскрыли */
+const dmy = t => t ? new Date(t).toLocaleDateString('ru-RU') : '';
+async function renderUsers() {
+  const box = $('usList');
+  if (!navigator.onLine && !EK.DEV) { box.innerHTML = '<p class="small muted">Нужна сеть.</p>'; return; }
+  let list;
+  try { list = await EK.users(); }
+  catch (e) { box.innerHTML = `<p class="small muted">Не загрузилось: ${esc(e.message || e)}</p>`; return; }
+  box.innerHTML = list.map((u, i) => {
+    const spent = [u.ai_usd != null && `ИИ $${(+u.ai_usd).toFixed(2).replace('.', ',')}`, u.golos_znaki != null && `озвучка ${u.golos_znaki} зн.`].filter(Boolean).join(' · ');
+    return `<div class="u"><input data-i="${i}" value="${esc(u.note || '')}" placeholder="имя" aria-label="Имя"><span class="em">${esc(u.email)}</span>
+      <span class="st">с ${dmy(u.added_at)} · ${u.signed_in_at ? 'входил ' + dmy(u.signed_in_at) : 'ещё не входил'}${spent ? ' · ' + spent : ''}</span></div>`;
+  }).join('') || '<p class="small muted">Список пуст.</p>';
+  box.querySelectorAll('input').forEach(inp => inp.onchange = async () => {
+    const u = list[+inp.dataset.i];
+    try { await EK.userPut(u.email, inp.value); u.note = inp.value.trim() || null; }
+    catch (e) { inp.value = u.note || ''; alert('Имя не сохранилось: ' + (e.message || e)); }
+  });
+}
+$('setUsers').ontoggle = () => { if ($('setUsers').open) renderUsers(); };
+$('usAdd').onsubmit = async ev => {
+  ev.preventDefault();
+  const email = $('usEmail').value.trim(), note = $('usNote').value.trim();
+  $('usMsg').textContent = '';
+  try {
+    await EK.userPut(email, note);
+    $('usEmail').value = $('usNote').value = '';
+    $('usMsg').textContent = `${email} добавлен — может входить.`;
+    renderUsers();
+  } catch (e) { $('usMsg').textContent = 'Не вышло: ' + (e.message || e); }
+};
+
 function renderSettings() {
+  $('setUsers').classList.toggle('hidden', !EK.admin);
   /* «Фраза на экране блокировки» — только в Android-приложении Экмафиси: сама функция и её настройки — там (android/) */
   try { $('setFraza').classList.toggle('hidden', localStorage.getItem('ekmafisi.android') !== '1'); } catch (e) {}
   /* тема экрана фразы — как здесь: родной экран запоминает её и для ярлыка и уведомления */

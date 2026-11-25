@@ -151,6 +151,18 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .howto .chev { color: var(--muted); transition: transform .2s; }
 .howto ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 .howto > div { display: grid; gap: 8px; margin-top: 12px; font-size: calc(15px + var(--up)); }
+/* Настройки → «Пользователи»: строка — имя (правится), адрес, с какого дня, последний вход, расход */
+.us { display: grid; gap: 4px; }
+.us .u { display: grid; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.us .u:last-child { border-bottom: 0; }
+.us .em { font-size: calc(13px + var(--up)); color: var(--muted); overflow-wrap: anywhere; }
+.us .st { font-size: calc(13px + var(--up)); color: var(--muted); font-variant-numeric: tabular-nums; }
+.us input, .us-add input { width: 100%; font: calc(16px + var(--up)) var(--f-ui); padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); }
+.us input { border-color: transparent; padding-left: 0; font-weight: 600; }
+.us input:focus { border-color: var(--line); padding-left: 10px; }
+.us-add { display: grid; gap: 8px; margin-top: 8px; }
+.us-add h3 { margin: 0; font-size: calc(15px + var(--up)); }
+.us-add .btn { justify-self: start; }
 .links { display: flex; gap: 16px; flex-wrap: wrap; font-size: calc(14px + var(--up)); }
 .links button, .links a { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
 .loading { font-size: calc(13px + var(--up)); color: var(--muted); }
@@ -362,6 +374,19 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <p class="small muted">Когда гаснет экран — фраза на обоях блокировки и в шторке, со звуком без разблокировки. Язык, откуда фразы, картинка, разрешения и история показанных — в её настройках.</p>
     <a class="btn" id="setFrazaGo" href="intent://fraza#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end" style="justify-self:start">Настроить</a>
   </section>
+  <details class="card howto hidden" id="setUsers">
+    <summary><h2>Пользователи</h2><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+    <div>
+      <div id="usList" class="us"></div>
+      <form id="usAdd" class="us-add">
+        <h3>Добавить</h3>
+        <input id="usEmail" type="email" placeholder="адрес Gmail" autocomplete="off" required>
+        <input id="usNote" type="text" placeholder="имя" autocomplete="off">
+        <button class="btn" type="submit">Добавить</button>
+        <p class="small muted" id="usMsg"></p>
+      </form>
+    </div>
+  </details>
   <section class="card">
     <h2>Учётная запись</h2>
     <p><span id="acctWho"></span><br><span class="small muted" id="acctSync"></span></p>
