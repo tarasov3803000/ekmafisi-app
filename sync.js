@@ -1,5 +1,7 @@
 /* Экмафиси — вход, содержимое и синхронизация.
    Порядок: вход (Google через Supabase) → допуск по списку адресов → список текстов → загрузка app.js.
+   Без входа или с адресом не из списка — гость (EK.guest, решение 25.11.2026): открытые тексты (library-open.json),
+   словарь, «Слова»; прогресс только на устройстве, без «Собери» и озвучки по запросу.
    Всё пишется сначала на устройстве (localStorage), отправляется при изменении, подтягивается при открытии и возвращении.
    Спор двух устройств по фразе — побеждает позднее изменение; журнал сливается по id.
    Тот же файл — вход и хранилище отдельного приложения «Словарь» (slovar-app/, EKM_CONFIG.app = 'slovar'):
@@ -16,7 +18,7 @@
   const writeJ = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
   const iso = x => new Date(x).toISOString();  /* время сервера и устройства — к одному виду, чтобы сравнивать строками */
 
-  const EK = window.EK = { DEV, uid: null, email: null, lib: [], status: '', onRemote: null, onStatus: null };
+  const EK = window.EK = { DEV, uid: null, email: null, guest: false, lib: [], status: '', onRemote: null, onStatus: null };
   const K = k => 'ekmafisi.' + EK.uid + '.' + k;  /* данные каждого человека — под его id: двое на одном телефоне не смешиваются */
 
   function screen(id) {
@@ -46,10 +48,10 @@
     } catch (e) { if (hit) return hit; throw e; }
   };
   async function loadLibrary() {
-    const r = await EK.content('library.json', navigator.onLine);
+    const r = await EK.content(EK.guest ? 'library-open.json' : 'library.json', navigator.onLine);
     const lib = await r.json();
     /* старые версии звука и словаря — из кэша вон */
-    const keep = new Set([ckey('library.json')]);
+    const keep = new Set([ckey('library.json'), ckey('library-open.json')]);
     lib.forEach(m => { keep.add(ckey(m.audio.file)); if (m.slovar) keep.add(ckey(m.slovar)); });
     caches.open(CC).then(c => c.keys().then(ks => ks.forEach(q => keep.has(q.url) || c.delete(q))));
     return lib;
@@ -61,15 +63,15 @@
   const saveOut = o => writeJ(K('outbox'), o);
   let timer = 0;
   const later = () => { clearTimeout(timer); timer = setTimeout(sync, 1500); };
-  EK.queueProgress = row => { const o = out(); o.p[row.text_id + '/' + row.phrase_id] = row; saveOut(o); later(); };
-  EK.queueLog = row => { const o = out(); o.l.push(row); saveOut(o); later(); };
-  EK.queueSettings = (key, v, t) => { const o = out(); o.s[key] = { v, t }; saveOut(o); later(); };
+  EK.queueProgress = row => { if (EK.guest) return; const o = out(); o.p[row.text_id + '/' + row.phrase_id] = row; saveOut(o); later(); };
+  EK.queueLog = row => { if (EK.guest) return; const o = out(); o.l.push(row); saveOut(o); later(); };
+  EK.queueSettings = (key, v, t) => { if (EK.guest) return; const o = out(); o.s[key] = { v, t }; saveOut(o); later(); };
   EK.pending = () => { const o = out(); return Object.keys(o.p).length + o.l.length + Object.keys(o.s).length; };
 
   /* --- синхронизация: отправить очередь, затем подтянуть изменённое с прошлого раза --- */
   let busy = false, again = false;
   async function sync() {
-    if (DEV || !EK.uid || ONLY_LEX) return;
+    if (DEV || !EK.uid || ONLY_LEX || EK.guest) return;
     if (!navigator.onLine) { setStatus('offline'); return; }
     if (busy) { again = true; return; }
     busy = true; clearTimeout(timer);
@@ -111,7 +113,7 @@
   EK.sync = sync;
   /* «Собери»: цепочки человека (таблица soberi_chains) и функция soberi — пополнить запас, «Моё тоже верно?» */
   EK.chains = async () => {
-    if (DEV || !navigator.onLine) return null;
+    if (DEV || EK.guest || !navigator.onLine) return null;
     const { data, error } = await sb.from('soberi_chains').select('id,lang,step,chain,state,created_at').eq('state', 'ready').order('created_at').limit(200);
     if (error) throw error;
     return data;
@@ -120,12 +122,14 @@
   /* озвучка по запросу (функция golos): { url } — подписанная ссылка на mp3; без сети, в ?dev и при отказе — ошибка */
   EK.golos = async (text) => {
     if (DEV || !navigator.onLine) throw new Error('нет связи');
+    if (EK.guest) throw new Error('только своим');
     const { data, error } = await sb.functions.invoke('golos', { body: { text } });
     if (error) throw error;
     return data;
   };
   EK.fn = async (body) => {
     if (DEV) throw new Error('dev');
+    if (EK.guest) throw new Error('только своим');
     const { data, error } = await sb.functions.invoke('soberi', { body });
     if (error) throw error;
     return data;
@@ -149,7 +153,7 @@
   async function checkAdmin() {
     const k = K('admin');
     EK.admin = DEV || readJ(k) === true;
-    if (DEV || !navigator.onLine) return;
+    if (DEV || EK.guest || !navigator.onLine) return;
     const { data, error } = await sb.rpc('is_admin');
     if (!error) { EK.admin = data === true; writeJ(k, EK.admin); }
   }
@@ -177,12 +181,22 @@
   }
   $('gateOut').onclick = () => EK.signOut();
   $('gateRetry').onclick = () => location.reload();
-  $('loginBtn').onclick = async () => {
-    $('loginBtn').disabled = true;
+  /* вход Google — с экрана входа «Словаря» (#loginBtn) и из настроек Экмафиси (EK.signIn); вернётся сюда же с ?code= */
+  EK.signIn = async () => {
+    if (DEV) return;
     const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: 'select_account' } } });
-    if (error) { $('loginBtn').disabled = false; $('loginErr').textContent = 'Не вышло: ' + error.message; }
+    if (error) throw error;
+  };
+  if ($('loginBtn')) $('loginBtn').onclick = async () => {
+    $('loginBtn').disabled = true;
+    try { await EK.signIn(); } catch (e) { $('loginBtn').disabled = false; $('loginErr').textContent = 'Не вышло: ' + e.message; }
   };
 
+  /* гость: email — вошёл, но адреса нет в списке (null — не входил); прогресс — под общим id «gost» на этом устройстве */
+  function guest(email) {
+    EK.guest = true;
+    return start({ id: 'gost', email: email || null });
+  }
   async function start(u) {
     EK.uid = u.id; EK.email = u.email;
     if (ONLY_LEX) return runApp();
@@ -190,7 +204,7 @@
     try { EK.lib = await loadLibrary(); }
     catch (e) {
       console.warn('library', e);
-      return gate(navigator.onLine ? 'Тексты не загрузились. Попробуйте ещё раз.' : 'Нет сети, а тексты на этом телефоне ещё не загружались. Откройте приложение один раз со связью.', true);
+      return gate(navigator.onLine ? 'Тексты не загрузились. Попробуйте ещё раз.' : 'Нет сети, а тексты на этом телефоне ещё не загружались. Откройте приложение один раз со связью.', !EK.guest || !!EK.email);
     }
     runApp();
   }
@@ -206,13 +220,13 @@
     const session = res.data && res.data.session;
     if (!session) {
       if (known && (res.timeout || !navigator.onLine)) return start(known);
-      $('loginBtn').disabled = false; return screen('login');
+      return guest(null);
     }
     const u = { id: session.user.id, email: session.user.email };
     if (!known || known.id !== u.id) {  /* первый вход этого человека здесь — допуск спросить у сервера */
       const { data: ok, error } = await sb.rpc('is_allowed');
       if (error) return gate('Сервер не ответил. Попробуйте ещё раз.', true);
-      if (!ok) return gate(`Адрес ${u.email} пока не в списке. Напишите Антону — он добавит.`, true);
+      if (!ok) return guest(u.email);
     }
     writeJ(UKEY, u);
     start(u);

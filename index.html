@@ -326,6 +326,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <section class="shelf" id="shelfList">
     <h2>Тексты</h2>
     <div class="shelf" id="texts"></div>
+    <p class="small muted hidden" id="guestNote"></p>
   </section>
 
 </main>
@@ -391,6 +392,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <h2>Учётная запись</h2>
     <p><span id="acctWho"></span><br><span class="small muted" id="acctSync"></span></p>
     <button class="btn" id="signOut" style="justify-self:start">Выйти</button>
+    <p class="err" id="signInErr"></p>
   </section>
   <section class="card">
     <h2>Итог</h2>

@@ -311,9 +311,13 @@ function renderShelf() {
     $('wordsOpen').innerHTML = `<span>Слова · ${w.ok}</span><small>освоено</small>`;
   }
   /* «Собери» и «Словарь» — только у греческого: карточка над текстами с текущей ступенью */
-  const sbOn = G.lang === 'el';
-  $('slvOpen').classList.toggle('hidden', !sbOn);
+  const sbOn = G.lang === 'el' && !EK.guest;  /* гость: «Собери» нет (ИИ — только своим), «Словарь» есть */
+  $('slvOpen').classList.toggle('hidden', G.lang !== 'el');
   $('sbCard').classList.toggle('hidden', !sbOn);
+  /* гость: открыто своё (пересказы, своя озвучка); прочие тексты — по ролику или фильму — только своим, после входа */
+  const gn = EK.guest && G.lang;
+  $('guestNote').classList.toggle('hidden', !gn);
+  if (gn) $('guestNote').textContent = (LIB.some(onShelf) ? 'Остальные тексты' : 'Тексты') + ' — по чужим роликам и фильмам, они открыты только своим. Войти — в настройках.';
   if (sbOn) $('sbCard').innerHTML = `<span class="t">Собери · ${esc(SB.step)}</span><span class="meta2">${esc(ladderOf(SB.step).t)}</span>`;
   const sbLast = sbOn && G.mode === 'soberi';
   $('resume').classList.toggle('hidden', !last && !sbLast);
@@ -1164,6 +1168,7 @@ function sbRefill(step) {
 }
 $('sbCard').onclick = () => { push('soberi'); soberiOpen(); };
 async function soberiOpen() {
+  if (EK.guest) return show('shelf');  /* «Собери» — ИИ, только своим */
   show('soberi'); G.mode = 'soberi'; saveG();
   renderSteps(); await sbLoad(); if (shown('soberi')) renderSteps();
 }
@@ -1465,9 +1470,15 @@ EK.onRemote = ({ progress, log, settings }) => {
 
 /* --- кто вошёл и состояние отправки --- */
 const SYNC_LBL = { synced: () => 'сохранено на сервере', pending: () => 'ждёт отправки', offline: () => 'без сети — хранится здесь', error: () => 'не отправилось — повторю' };
-EK.onStatus = st => { $('acctSync').textContent = SYNC_LBL[st] ? '· ' + SYNC_LBL[st]() : ''; };
-$('acctWho').textContent = EK.email || '';
-$('signOut').onclick = () => EK.signOut();
+EK.onStatus = st => { $('acctSync').textContent = EK.guest ? 'прогресс хранится только на этом устройстве' : SYNC_LBL[st] ? '· ' + SYNC_LBL[st]() : ''; };
+/* гость: не входил — «Войти через Google»; вошёл, но адреса нет в списке — адрес и «Выйти» */
+$('acctWho').textContent = !EK.guest ? EK.email || '' : EK.email ? `${EK.email} — адреса нет в списке своих` : 'Без входа';
+$('signOut').textContent = EK.guest && !EK.email ? 'Войти через Google' : 'Выйти';
+$('signOut').onclick = () => {
+  if (!(EK.guest && !EK.email)) return EK.signOut();
+  $('signOut').disabled = true;
+  EK.signIn().catch(e => { $('signOut').disabled = false; $('signInErr').textContent = 'Не вышло: ' + e.message; });
+};
 EK.onStatus(EK.status || (navigator.onLine ? '' : 'offline'));
 
 /* --- верхняя строка: на всех экранах; прокрутка вниз — уезжает, вверх — возвращается --- */
