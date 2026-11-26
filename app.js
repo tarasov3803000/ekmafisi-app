@@ -237,13 +237,17 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
-  ['shelf', 'settings', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  if (id !== 'nasluh') nsStop();
+  ['shelf', 'settings', 'about', 'nasluh', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
-  $('goHome').style.visibility = id === 'shelf' ? 'hidden' : '';  /* на полке домик не нужен — место держит */
+  /* на полке вместо домика — флаг изучаемого языка (нажатие — другой язык) */
+  $('goHome').classList.toggle('hidden', id === 'shelf'); $('langFlag').classList.toggle('hidden', id !== 'shelf');
   if (id === 'shelf') renderShelf();
   if (id === 'home') renderHome();
   if (id === 'settings') renderSettings();
   if (id === 'words') renderWords();
+  if (id === 'nasluh') nsOpen();
+  $('acctPop').classList.add('hidden');
 }
 const shown = id => !$(id).classList.contains('hidden');
 
@@ -259,7 +263,7 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
   else { history.replaceState({ d: 0, sheet: null }, '', urlOf(fallback)); applyLoc(); }
 }
 function parseHash(h) {
-  if (['settings', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
+  if (['settings', 'about', 'nasluh', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
   if (h === 'slovar' || h.startsWith('slovar/')) {  /* #slovar/<лемма>[/tab|/etym] — статья, её таблицы или происхождение */
     const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.match(/\/(tab|etym|hist)$/);
     return { v: 'slovar', l: m ? r.slice(0, -m[0].length) : r, m: m ? m[1] : null };
@@ -269,7 +273,7 @@ function parseHash(h) {
 }
 function applyLoc(force) {  /* force — первый вход: экран рисуется, даже если уже виден */
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
-  if (t.v === 'shelf' || t.v === 'settings' || t.v === 'words') { if (force || !shown(t.v)) show(t.v); }
+  if (['shelf', 'settings', 'about', 'nasluh', 'words'].includes(t.v)) { if (force || !shown(t.v)) show(t.v); }
   else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
   else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slv().show(t.l, t.m); }
   else if (t.v === 'soberi') { if (force || !shown('soberi')) soberiOpen(); }
@@ -310,6 +314,12 @@ function renderShelf() {
     $('chkOpen').disabled = !n;
     $('wordsOpen').innerHTML = `<span>Слова · ${w.ok}</span><small>освоено</small>`;
   }
+  /* «Фразы на блокировке» — история показанных на экране блокировки; сама история — на телефоне, в Android-приложении */
+  let andr = false; try { andr = localStorage.getItem('ekmafisi.android') === '1'; } catch (e) {}
+  $('frazaOpen').classList.toggle('hidden', !andr); $('nsOpen').classList.toggle('solo', !andr);
+  $('frazaOpen').href = `intent://fraza/istoriya?tema=${themeNow()}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
+  $('langFlag').textContent = { el: '🇬🇷', en: '🇬🇧' }[G.lang] || '🌐';
+  $('langFlag').setAttribute('aria-label', 'Язык: ' + (G.lang ? LANGS[G.lang].name : 'не выбран') + '. Сменить');
   /* «Собери» и «Словарь» — только у греческого: карточка над текстами с текущей ступенью */
   const sbOn = G.lang === 'el' && !EK.guest;  /* гость: «Собери» нет (ИИ — только своим), «Словарь» есть */
   $('slvOpen').classList.toggle('hidden', G.lang !== 'el');
@@ -328,6 +338,7 @@ $('resume').onclick = () => { if (G.lang === 'el' && G.mode === 'soberi') { push
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
 /* --- настройки: всё, что не учёба — язык, тема, учётная запись, итог --- */
 $('setOpen').onclick = () => { push('settings'); show('settings'); };
+$('langFlag').onclick = () => { const k = Object.keys(LANGS); G.lang = k[(k.indexOf(G.lang) + 1) % k.length]; saveG(); renderShelf(); };
 /* Настройки → «Пользователи» (только Антону, EK.admin): список подгружается, когда карточку раскрыли */
 const dmy = t => t ? new Date(t).toLocaleDateString('ru-RU') : '';
 async function renderUsers() {
@@ -365,10 +376,11 @@ function renderSettings() {
   /* «Фраза на экране блокировки» — только в Android-приложении Экмафиси: сама функция и её настройки — там (android/) */
   try { $('setFraza').classList.toggle('hidden', localStorage.getItem('ekmafisi.android') !== '1'); } catch (e) {}
   /* тема экрана фразы — как здесь: родной экран запоминает её и для ярлыка и уведомления */
-  $('setFrazaGo').href = `intent://fraza?tema=${['light', 'dark'].includes(G.theme) ? G.theme : 'auto'}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
+  $('setFraza').href = `intent://fraza?tema=${themeNow()}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
   document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
-  document.querySelectorAll('#setTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === (G.theme || 'auto'))));
-  document.querySelectorAll('#setBtN button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.n === (G.btN || 3))));
+  $('setBtN').value = G.btN || 3; $('setBtNV').textContent = G.btN || 3;
+  closePops();
+  paintBig();
   /* уровни на полке — свои у каждого языка; последний включённый не выключается (полка не бывает пустой) */
   const lv = G.lang ? levelsOf(G.lang) : [];
   $('setLevelCard').classList.toggle('hidden', lv.length < 2);
@@ -381,20 +393,33 @@ function renderSettings() {
     saveG(); renderSettings();
   });
 }
-document.querySelectorAll('#setBtN button').forEach(b => b.onclick = () => { G.btN = +b.dataset.n; saveG(); renderSettings(); });
+$('setBtN').oninput = () => { G.btN = +$('setBtN').value; $('setBtNV').textContent = G.btN; };
+$('setBtN').onchange = () => { G.btN = +$('setBtN').value; saveG(); };
 document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
 /* крупный шрифт: +1…+5 px ко всем текстам, как в читалке (+4 и +5 — для планшета); только на этом устройстве (экраны телефона и Мака разные),
-   ключ вне учётной записи — читается до входа (index.html) */
+   ключ вне учётной записи — читается до входа (index.html). Ползунок — кегль меняется сразу, пока тянете */
 const UP = 'ekmafisi-up';
 const upNow = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue('--up')) || 0;
-const paintBig = () => document.querySelectorAll('#setBig button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.up === upNow())));
-document.querySelectorAll('#setBig button').forEach(b => b.onclick = () => {
-  document.documentElement.style.setProperty('--up', b.dataset.up + 'px');
-  try { localStorage.setItem(UP, b.dataset.up); localStorage.removeItem('ekmafisi-big'); } catch (e) {}
+const paintBig = () => { const u = upNow(); $('setBig').value = u; $('setBigV').textContent = u ? '+' + u : 'обычный'; };
+$('setBig').oninput = () => {
+  const u = +$('setBig').value;
+  document.documentElement.style.setProperty('--up', u + 'px');
+  try { localStorage.setItem(UP, String(u)); localStorage.removeItem('ekmafisi-big'); } catch (e) {}
   paintBig();
-});
+};
 paintBig();
-document.querySelectorAll('#setTheme button').forEach(b => b.onclick = () => { G.theme = b.dataset.t; saveG(); paintTheme(); renderSettings(); });
+/* окошко с ползунком: нажатие на значение — открыть/закрыть, нажатие мимо — закрыть */
+const closePops = except => document.querySelectorAll('.rng').forEach(r => { if (r === except) return; r.querySelector('.pop').classList.add('hidden'); r.querySelector('.val').setAttribute('aria-expanded', 'false'); });
+document.querySelectorAll('.rng .val').forEach(b => b.onclick = () => {
+  const r = b.closest('.rng'), open = r.querySelector('.pop').classList.toggle('hidden') === false;
+  closePops(r); b.setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', e => { if (!e.target.closest('.rng')) closePops(); });
+/* ⓘ — о программе (как пользоваться, итог) */
+$('aboutOpen').onclick = () => { if (!shown('about')) { push('about'); show('about'); } };
+/* значок учётной записи: адрес и «Выйти» (или «Войти через Google») — окошком под значком */
+$('acctOpen').onclick = e => { e.stopPropagation(); const h = !$('acctPop').classList.toggle('hidden'); $('acctOpen').setAttribute('aria-expanded', String(h)); };
+document.addEventListener('click', e => { if (!e.target.closest('.acct')) { $('acctPop').classList.add('hidden'); $('acctOpen').setAttribute('aria-expanded', 'false'); } });
 
 function setText(id, quiet) {  /* quiet — для «Проверки»: текст нужен, «Продолжить» не трогаем */
   const m = LIB.find(x => x.id === id);
@@ -1400,14 +1425,177 @@ $('gPlay').onclick = () => {
   speechSynthesis.speak(u);
 };
 
-/* --- тема: авто (как в системе) · светлая · тёмная --- */
-const THEMES = { auto: 'авто', light: 'светлая', dark: 'тёмная' };
+/* --- «На слух» (Ваше задание 26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → 8 с → следующая.
+   На экране — фраза и перевод крупно, звучащая строка подсвечена. Откуда фразы — выбор, запоминается (G.nsSrc):
+   «из словаря» — примеры статей со звуком Azure, тот же отбор, что у фразы на блокировке (tools/fraza_nabor.py:
+   без служебных слов, от 5 слов, от частых) — el/slovar2-primery.json, звук el/zvuk-prim/<голос>/<z>.mp4; только греческий;
+   «из обучения» — фразы начатых текстов полки (есть журнал; не начато ни одного — все тексты полки), звук — отрезок
+   файла текста. Русский — Azure ru-RU-DmitryNeural, озвучен заранее (tools/azure_golos.py russkij → el/slovar2-ru.json,
+   el/zvuk-prim/ru-dmitry/); не озвучен — голос телефона ru-RU; нет и его — пауза по длине перевода.
+   Порядок — вперемешку; экран не гаснет, пока звучит (Wake Lock). Прогресс и цвета не трогает.
+   «Только сложные» (G.nsHard, Ваша просьба 26.11): во фразе не меньше трёх слов вне первой тысячи частотного списка
+   языка (<язык>/chastoty.json, все формы; ударения не в счёт). Доля: словарь ≈ 21 %, греческие тексты ≈ 40 %, английские ≈ 27 %. */
+const NS_REDKIH = 3;
+const nsNorm = w => w.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/ς/g, 'σ');
+const nsChast = {};  /* язык → Set форм первой тысячи */
+async function nsChastoty(lang) {
+  if (!nsChast[lang]) {
+    const d = await (await EK.content(lang + '/chastoty.json')).json();
+    nsChast[lang] = new Set(d.lemmas.flatMap(x => [x.lemma, ...(x.forms || [])]).map(nsNorm));
+  }
+  return nsChast[lang];
+}
+const nsRedkih = (t, S) => (t.match(/\p{L}+/gu) || []).filter(w => !S.has(nsNorm(w))).length;
+const NS = { list: null, src: null, k: 0, tok: 0, on: false, a: new Audio(), wake: null, prim: null, ru: undefined, urls: new Map() };
+NS.a.preload = 'auto';
+const NS_PAUSA = [1000, 1000, 8000];  /* после фразы, после перевода, после повтора */
+const nsSleep = (ms, tok) => new Promise((ok, no) => setTimeout(() => tok === NS.tok ? ok() : no('stop'), ms));
+const nsShuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const nsSrcOk = s => s === 'slovar' ? G.lang === 'el' : true;
+const nsZvKey = p => new URL('slovar/' + p, location.origin + '/').href;  /* кэш звука словаря — общий с экраном «Словарь» (slovar.js) */
+async function nsRuIndex() {  /* указатель русской озвучки; нет файла или сети — undefined → null, голос телефона */
+  if (NS.ru === undefined) NS.ru = await EK.content('el/slovar2-ru.json', navigator.onLine).then(r => r.ok ? r.json() : null).catch(() => null);
+  return NS.ru;
+}
+async function nsList(src) {
+  nsRuIndex();
+  if (src === 'slovar') {
+    if (!NS.prim) NS.prim = await (await EK.content('el/slovar2-primery.json', navigator.onLine)).json();
+    return nsShuffle(NS.prim.p.map(x => ({ f: x.f, ru: x.ru, podp: x.l, z: `el/zvuk-prim/${NS.prim.g}/${x.z}.mp4` })));
+  }
+  const all = LIB.filter(onShelf), started = all.filter(m => progOf(m).log.length);
+  return nsShuffle((started.length ? started : all).flatMap(m => m.phrases.map(p => ({ f: TX(p), ru: p.ru, podp: TTL(m), m, p }))));
+}
+async function nsListHard(src) {  /* весь список или только сложные фразы */
+  const l = await nsList(src);
+  if (!G.nsHard) return l;
+  try { const S = await nsChastoty(G.lang || 'el'); return l.filter(x => nsRedkih(x.f, S) >= NS_REDKIH); }
+  catch (e) { console.warn('на слух: частоты', e); return l; }  /* без частотного списка — все */
+}
+async function nsBlob(x) {  /* звук фразы: файл примера словаря или файл текста целиком (отрезок — в nsSay) */
+  if (x.m) {
+    if (!blobs[x.m.id]) blobs[x.m.id] = URL.createObjectURL(await (await EK.content(x.m.audio.file)).blob());
+    return blobs[x.m.id];
+  }
+  if (NS.urls.has(x.z)) return NS.urls.get(x.z);
+  const c = await caches.open('ekmafisi-slovar-zvuk-v1'), k = nsZvKey(x.z);
+  let r = await c.match(k);
+  if (!r) { r = await EK.remote(x.z); if (!r.ok) throw new Error(r.status); await c.put(k, r.clone()); }
+  const url = URL.createObjectURL(await r.blob());
+  NS.urls.set(x.z, url);
+  if (NS.urls.size > 12) { const [z0, u0] = NS.urls.entries().next().value; NS.urls.delete(z0); URL.revokeObjectURL(u0); }  /* держим последние — память телефона */
+  return url;
+}
+function nsSay(x, tok) {  /* фраза на языке: целый файл примера или отрезок файла текста [at, at + длительность] */
+  return nsBlob(x).then(url => new Promise((ok, no) => {
+    if (tok !== NS.tok) return no('stop');
+    const a = NS.a, rate = x.rate || G.rate || 1;
+    if (a.src !== url) a.src = url;
+    a.defaultPlaybackRate = a.playbackRate = rate; a.preservesPitch = a.webkitPreservesPitch = true;
+    const end = x.p ? x.p.at + (x.p.end - x.p.start) : null;
+    let t = 0;
+    const fin = () => { clearTimeout(t); a.onended = a.ontimeupdate = null; a.pause(); tok === NS.tok ? ok() : no('stop'); };
+    a.onended = fin;
+    if (end !== null) a.ontimeupdate = () => { if (a.currentTime >= end) fin(); };
+    const go = () => {
+      const pr = a.play(); if (pr && pr.catch) pr.catch(() => fin());
+      /* запас: timeupdate редок (≈ 4 раза в секунду), rAF спит на погасшем экране */
+      if (end !== null) t = setTimeout(fin, ((end - x.p.at) / rate) * 1000 + 300);
+    };
+    if (x.p) { const seek = () => { a.currentTime = x.p.at; go(); }; a.readyState >= 1 ? seek() : a.addEventListener('loadedmetadata', seek, { once: true }); }
+    else { a.currentTime = 0; go(); }
+  }));
+}
+const ruVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^ru(-|_|$)/i.test(v.lang));
+async function nsRu(text, tok) {
+  const ri = await nsRuIndex(), z = ri && ri.i[text.split(/\s+/).join(' ').trim()];
+  if (tok !== NS.tok) throw 'stop';
+  if (z) {
+    try { return await nsSay({ z: `el/zvuk-prim/${ri.g}/${z}.mp4`, rate: 1 }, tok); }
+    catch (e) { if (e === 'stop') throw e; console.warn('на слух: русский', e); }  /* не скачался — голосом телефона */
+  }
+  return nsRuPhone(text, tok);
+}
+function nsRuPhone(text, tok) {  /* перевод голосом телефона; onend в Chrome на Android бывает не приходит — страховка по длине */
+  return new Promise((ok, no) => {
+    const fin = () => { clearTimeout(t); tok === NS.tok ? ok() : no('stop'); };
+    const v = ruVoice(), est = 600 + text.length * 75;
+    let t = setTimeout(fin, v ? est * 2 + 2000 : est);
+    if (!v) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang; u.rate = 1;
+    u.onend = u.onerror = fin;
+    speechSynthesis.speak(u);
+  });
+}
+function nsPaint() {
+  const x = NS.list && NS.list[NS.k];
+  $('nsF').textContent = x ? x.f : ''; $('nsRu').textContent = x ? x.ru : ''; $('nsPodp').textContent = x ? x.podp : '';
+  $('nsF').lang = G.lang || 'el';
+  $('nsPlay').innerHTML = (NS.on ? ICO_PAUSE : ICO_PLAY).replace(/40/g, '34');
+  $('nsPlay').setAttribute('aria-label', NS.on ? 'Пауза' : 'Слушать');
+  $('nsHard').setAttribute('aria-checked', String(!!G.nsHard));
+  document.querySelectorAll('#nsSrc button').forEach(b => {
+    b.setAttribute('aria-pressed', String(b.dataset.s === NS.src)); b.disabled = !nsSrcOk(b.dataset.s);
+  });
+}
+const nsMark = w => { $('nsF').classList.toggle('on', w === 'f'); $('nsRu').classList.toggle('on', w === 'ru'); };
+async function nsWake(on) {
+  try {
+    if (on && !NS.wake && navigator.wakeLock) { NS.wake = await navigator.wakeLock.request('screen'); NS.wake.onrelease = () => { NS.wake = null; }; }
+    if (!on && NS.wake) { await NS.wake.release(); NS.wake = null; }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && NS.on) nsWake(true); });
+async function nsLoop() {
+  const tok = ++NS.tok; NS.on = true; nsPaint(); nsWake(true); $('nsMsg').textContent = '';
+  try {
+    while (tok === NS.tok) {
+      const x = NS.list[NS.k]; nsPaint();
+      nsMark('f'); await nsSay(x, tok); nsMark(''); await nsSleep(NS_PAUSA[0], tok);
+      nsMark('ru'); await nsRu(x.ru, tok); nsMark(''); await nsSleep(NS_PAUSA[1], tok);
+      nsMark('f'); await nsSay(x, tok); nsMark(''); await nsSleep(NS_PAUSA[2], tok);
+      NS.k = (NS.k + 1) % NS.list.length;
+    }
+  } catch (e) {
+    if (e === 'stop') return;
+    console.warn('на слух:', e);
+    $('nsMsg').textContent = navigator.onLine ? 'Звук не загрузился — нажмите ▶ ещё раз.' : 'Нет сети: звук этой фразы ещё не загружался.';
+    nsStop();
+  }
+}
+function nsStop() {
+  NS.tok++; NS.on = false; NS.a.pause();
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  nsWake(false); nsMark(''); if (shown('nasluh')) nsPaint();
+}
+async function nsSetSrc(src) {
+  nsStop(); NS.src = src; NS.k = 0; NS.list = null; nsPaint();
+  $('nsMsg').textContent = 'Загружаю…';
+  try { NS.list = await nsListHard(src); }
+  catch (e) { console.warn('на слух:', e); $('nsMsg').textContent = navigator.onLine ? 'Фразы не загрузились.' : 'Нет сети: фразы словаря ещё не загружались.'; return; }
+  if (NS.src !== src) return;
+  $('nsMsg').textContent = NS.list.length ? '' : 'Фраз нет.';
+  nsPaint();
+}
+function nsOpen() {
+  const want = nsSrcOk(G.nsSrc) ? G.nsSrc || 'slovar' : 'teksty', src = nsSrcOk(want) ? want : 'teksty';
+  if (NS.src !== src || !NS.list || NS.lang !== G.lang) { NS.lang = G.lang; nsSetSrc(src); } else nsPaint();
+}
+$('nsOpen').onclick = () => { push('nasluh'); show('nasluh'); };
+document.querySelectorAll('#nsSrc button').forEach(b => b.onclick = () => { if (b.dataset.s === NS.src) return; G.nsSrc = b.dataset.s; saveG(); nsSetSrc(b.dataset.s); });
+$('nsHard').onclick = () => { G.nsHard = !G.nsHard; saveG(); nsSetSrc(NS.src); };
+$('nsPlay').onclick = () => { if (NS.on) nsStop(); else if (NS.list && NS.list.length) nsLoop(); };
+$('nsNext').onclick = () => { if (!NS.list || !NS.list.length) return; const was = NS.on; nsStop(); NS.k = (NS.k + 1) % NS.list.length; nsPaint(); if (was) nsLoop(); };
+
+/* --- тема: светлая · тёмная (26.11.2026 — без «как в системе»; не выбрана — пока как в системе, первое нажатие выбирает) --- */
+const THEMES = { light: 'светлая', dark: 'тёмная' };
+const themeNow = () => THEMES[G.theme] ? G.theme : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 function paintTheme() {
-  if (G.theme === 'auto' || !THEMES[G.theme]) document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = G.theme;
-  const t = THEMES[G.theme] ? G.theme : 'auto';
+  const t = themeNow();
+  document.documentElement.dataset.theme = t;
   const svg = d => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   $('theme').innerHTML = svg({
-    auto: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
     light: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     dark: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
   }[t]);
@@ -1417,7 +1605,7 @@ function paintTheme() {
   document.querySelectorAll('meta[name="theme-color"]').forEach(x => { x.content = paper; x.removeAttribute('media'); });
   if (shown('settings')) renderSettings();
 }
-$('theme').onclick = () => { const k = Object.keys(THEMES); G.theme = k[(k.indexOf(G.theme) + 1) % k.length]; saveG(); paintTheme(); };
+$('theme').onclick = () => { G.theme = themeNow() === 'dark' ? 'light' : 'dark'; saveG(); paintTheme(); };
 paintTheme();
 
 /* --- подтянутое с сервера: по фразе — позднее изменение; журнал — по id; настройки — по ключу --- */

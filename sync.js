@@ -51,7 +51,7 @@
     const r = await EK.content(EK.guest ? 'library-open.json' : 'library.json', navigator.onLine);
     const lib = await r.json();
     /* старые версии звука и словаря — из кэша вон */
-    const keep = new Set([ckey('library.json'), ckey('library-open.json')]);
+    const keep = new Set([ckey('library.json'), ckey('library-open.json'), ckey('el/slovar2-primery.json')]);  /* примеры словаря — режим «На слух» */
     lib.forEach(m => { keep.add(ckey(m.audio.file)); if (m.slovar) keep.add(ckey(m.slovar)); });
     caches.open(CC).then(c => c.keys().then(ks => ks.forEach(q => keep.has(q.url) || c.delete(q))));
     return lib;

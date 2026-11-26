@@ -57,6 +57,40 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .seg button { border: 0; background: transparent; padding: 8px 12px; min-height: 40px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+/* настройки — одной карточкой, строка «название — выбор»; ползунок со значением в окошке */
+.set { gap: 0; padding: 4px 16px; }
+.srow { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 60px; padding: 8px 0; border-top: 1px solid var(--line); }
+.srow:first-child { border-top: 0; }
+.srow > span:first-child { font-weight: 500; }
+.srow .btn { min-height: 40px; padding: 8px 14px; }
+/* значение — в окошке; нажали — под ним всплывает ползунок (подпись с ползунком в строку на телефоне не влезает) */
+.rng { position: relative; flex: none; }
+.val { min-width: 2.6em; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; }
+.val[aria-expanded="true"] { border-color: var(--accent); }
+.pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; width: 240px; max-width: calc(100vw - 48px); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.16); display: flex; }
+.pop input { width: 100%; height: 32px; accent-color: var(--accent); }
+.srow.go { color: inherit; text-decoration: none; }
+.srow.go svg { color: var(--muted); flex: none; }
+.howto-txt { display: grid; gap: 8px; font-size: calc(15px + var(--up)); }
+.howto-txt ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+/* учётная запись: значок в верхней строке, по нажатию — адрес и «Выйти» (или «Войти через Google») */
+.acct { position: relative; display: inline-flex; }
+.acct-pop { position: absolute; right: 0; top: 46px; z-index: 6; min-width: 240px; max-width: calc(100vw - 32px); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16); overflow-wrap: anywhere; }
+.acct-pop .btn { min-height: 40px; padding: 8px 14px; justify-self: start; }
+.acct-pop .err:empty, .acct-pop .muted:empty { display: none; }
+/* «На слух»: фраза и перевод крупно; говорящая строка — цветом */
+.tools .solo { grid-column: 1 / -1; }  /* «На слух» один в ряду — во всю ширину (без Android-приложения плитки «Фразы на блокировке» нет) */
+.tbar .flag { font-size: 28px; line-height: 1; padding: 6px 8px; }
+#nasluh { min-height: 100dvh; align-content: start; }
+.ns-src { justify-self: center; }
+.ns-hard { justify-self: center; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: calc(15px + var(--up)); }
+.ns-card { display: grid; gap: 18px; text-align: center; padding: 24px 4px; min-height: 46vh; align-content: center; }
+.ns-f { font: 600 calc(32px + var(--up))/1.25 var(--f-el); transition: color .2s; }
+.ns-ru { font-size: calc(24px + var(--up)); line-height: 1.3; color: var(--muted); transition: color .2s; }
+.ns-card .on { color: var(--accent); }
+.ns-msg { text-align: center; }
+.ns-msg:empty { display: none; }
+.ns-ctl { display: flex; justify-content: center; gap: 24px; }
 .hidden { display: none !important; }
 .sqs { display: inline-flex; gap: 14px; margin-left: 14px; font-variant-numeric: tabular-nums; vertical-align: middle; }
 .text .sqs { margin-left: 0; font-size: calc(13px + var(--up)); color: var(--muted); }
@@ -291,8 +325,12 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 <body>
 
 <header class="tbar hidden" id="top"><div>
+  <button class="icon flag hidden" id="langFlag" aria-label="Язык"></button>
   <button class="icon" id="goHome" aria-label="На полку"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h5v-6h4v6h5V9"/></svg></button>
   <span class="sp"></span>
+  <button class="icon" id="aboutOpen" aria-label="О программе"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r=".6" fill="currentColor"/></svg></button>
+  <span class="acct"><button class="icon" id="acctOpen" aria-label="Учётная запись" aria-expanded="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button>
+    <div class="acct-pop hidden" id="acctPop"><p id="acctWho"></p><p class="small muted" id="acctSync"></p><button class="btn" id="signOut">Выйти</button><p class="err" id="signInErr"></p></div></span>
   <button class="icon" id="theme" aria-label="Тема"></button>
   <button class="icon" id="setOpen" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
 </div></header>
@@ -314,12 +352,14 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <section id="langPick" class="card hidden">
     <h2>Что учите</h2>
     <div class="row"><button class="btn" data-lang="el" style="flex:1">Греческий</button><button class="btn" data-lang="en" style="flex:1">Английский</button></div>
-    <p class="small muted">Сменить можно в настройках. Прогресс каждого языка хранится свой.</p>
+    <p class="small muted">Сменить можно в настройках.</p>
   </section>
   <button class="btn primary wide resume hidden" id="resume" style="min-height:64px"></button>
   <div class="tools hidden" id="shelfTools">
     <button class="btn" id="chkOpen"></button>
     <button class="btn" id="wordsOpen"></button>
+    <button class="btn" id="nsOpen"><span>На слух</span><small>фраза и перевод</small></button>
+    <a class="btn hidden" id="frazaOpen" href="intent://fraza/istoriya#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Фразы на блокировке</span><small>история</small></a>
   </div>
   <button class="slv-open hidden" id="slvOpen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Словарь</span></button>
   <button class="text soberi-card hidden" id="sbCard"></button>
@@ -332,48 +372,13 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 </main>
 
 <main id="settings" class="hidden">
-  <div class="bar"><span class="ttl">Настройки</span></div>
-  <details class="card howto" id="howto">
-    <summary><h2>Как пользоваться</h2><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
-    <div>
-      <p>Каждый текст учится тремя способами — любым, в каком хочется порядке:</p>
-      <ul>
-        <li><b>Повторение</b> — слушайте фразу и повторяйте вслух, пока она не начнёт говориться сама.</li>
-        <li><b>Обратный перевод</b> — по русскому напишите фразу на языке и сверьте с оригиналом.</li>
-        <li><b>Весь текст</b> — прочитайте и послушайте целиком, выучите наизусть.</li>
-      </ul>
-      <p>Цвет фразы ставите сами: шапочка — «уже знаю», в обратном переводе — «трудно» и «не знаю».</p>
-      <p>Новый текст — только когда сами его откроете. Слово: нажать — перевод, подержать — происхождение. Карточки листаются свайпом влево и вправо.</p>
-    </div>
-  </details>
-  <section class="card">
-    <h2>Учу</h2>
-    <div class="seg" id="setLang" role="group" aria-label="Язык обучения"><button data-lang="el">греческий</button><button data-lang="en">английский</button></div>
-    <p class="small muted">Прогресс каждого языка хранится свой.</p>
-  </section>
-  <section class="card" id="setLevelCard">
-    <h2>Уровень</h2>
-    <div class="seg" id="setLevel" role="group" aria-label="Уровни на полке"></div>
-    <p class="small muted">На полке — только включённые уровни. Начатые тексты остаются в «Проверке».</p>
-  </section>
-  <section class="card">
-    <h2>Тема</h2>
-    <div class="seg" id="setTheme" role="group" aria-label="Тема"><button data-t="auto">авто</button><button data-t="light">светлая</button><button data-t="dark">тёмная</button></div>
-  </section>
-  <section class="card">
-    <h2>Шрифт</h2>
-    <div class="seg" id="setBig" role="group" aria-label="Размер шрифта"><button data-up="0">обычный</button><button data-up="1">+1</button><button data-up="2">+2</button><button data-up="3">+3</button><button data-up="4">+4</button><button data-up="5">+5</button></div>
-    <p class="small muted">Все тексты крупнее на одну–пять ступеней. Только на этом устройстве.</p>
-  </section>
-  <section class="card">
-    <h2>Обратный перевод</h2>
-    <div class="seg" id="setBtN" role="group" aria-label="Фраз за раз"><button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button></div>
-    <p class="small muted">Сколько фраз переводить за раз.</p>
-  </section>
-  <section class="card hidden" id="setFraza">
-    <h2>Фраза на экране блокировки</h2>
-    <p class="small muted">Когда гаснет экран — фраза на обоях блокировки и в шторке, со звуком без разблокировки. Язык, откуда фразы, картинка, разрешения и история показанных — в её настройках.</p>
-    <a class="btn" id="setFrazaGo" href="intent://fraza#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end" style="justify-self:start">Настроить</a>
+  <!-- всё на одном экране, строкой «название — выбор» (Ваше слово 26.11.2026); «Как пользоваться» и «Итог» — в окне ⓘ, учётная запись — значок в верхней строке -->
+  <section class="card set">
+    <div class="srow"><span>Учу</span><div class="seg" id="setLang" role="group" aria-label="Язык обучения"><button data-lang="el">греческий</button><button data-lang="en">английский</button></div></div>
+    <div class="srow" id="setLevelCard"><span>Уровень</span><div class="seg" id="setLevel" role="group" aria-label="Уровни на полке"></div></div>
+    <div class="srow"><span>Размер шрифта</span><span class="rng"><button class="val" id="setBigV" aria-expanded="false" aria-label="Размер шрифта"></button><span class="pop hidden"><input type="range" id="setBig" min="0" max="5" step="1" aria-label="Размер шрифта"></span></span></div>
+    <div class="srow"><span>Обратный перевод — кол-во фраз</span><span class="rng"><button class="val" id="setBtNV" aria-expanded="false" aria-label="Обратный перевод — фраз за раз"></button><span class="pop hidden"><input type="range" id="setBtN" min="1" max="3" step="1" aria-label="Обратный перевод — фраз за раз"></span></span></div>
+    <a class="srow go hidden" id="setFraza" href="intent://fraza#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Фраза на экране блокировки</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a>
   </section>
   <details class="card howto hidden" id="setUsers">
     <summary><h2>Пользователи</h2><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
@@ -388,18 +393,40 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
       </form>
     </div>
   </details>
-  <section class="card">
-    <h2>Учётная запись</h2>
-    <p><span id="acctWho"></span><br><span class="small muted" id="acctSync"></span></p>
-    <button class="btn" id="signOut" style="justify-self:start">Выйти</button>
-    <p class="err" id="signInErr"></p>
+</main>
+
+<!-- ⓘ — о программе: как пользоваться и итог -->
+<main id="about" class="hidden">
+  <section class="card howto-txt">
+      <p>Каждый текст учится тремя способами — любым, в каком хочется порядке:</p>
+      <ul>
+        <li><b>Повторение</b> — слушайте фразу и повторяйте вслух, пока она не начнёт говориться сама.</li>
+        <li><b>Обратный перевод</b> — по русскому напишите фразу на языке и сверьте с оригиналом.</li>
+        <li><b>Весь текст</b> — прочитайте и послушайте целиком, выучите наизусть.</li>
+      </ul>
+      <p><b>На слух</b> (на полке) — фраза, перевод и снова фраза, потом пауза; руки свободны.</p>
+      <p>Цвет фразы ставите сами: шапочка — «уже знаю», в обратном переводе — «трудно» и «не знаю».</p>
+      <p>Новый текст — только когда сами его откроете. Слово: нажать — перевод, подержать — происхождение. Карточки листаются свайпом влево и вправо.</p>
   </section>
-  <section class="card">
-    <h2>Итог</h2>
-    <p class="small muted">Цвета, написанное и журнал всех текстов — текстом, чтобы переслать.</p>
-    <button class="btn" id="copy" style="justify-self:start">Скопировать итог</button>
-    <div id="copyWrap" class="hidden"><p class="small">Скопируйте текст вручную:</p><textarea class="copybox" id="copyText" readonly></textarea></div>
+  <section class="card howto-txt">
+      <h2>Итог</h2>
+      <p class="small muted">Всё отмеченное — цвета фраз, написанное в обратном переводе, журнал занятий и пометки «Неверно?» — одним текстом. Нужен, чтобы прислать разработчику для разбора: скопировали — вставьте в письмо или в чат. Прогресс и так хранится на сервере.</p>
+      <button class="btn" id="copy" style="justify-self:start">Скопировать итог</button>
+      <div id="copyWrap" class="hidden"><p class="small">Скопируйте текст вручную:</p><textarea class="copybox" id="copyText" readonly></textarea></div>
   </section>
+</main>
+
+<!-- «На слух» (26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → 8 с → следующая -->
+<main id="nasluh" class="hidden">
+  <div class="seg ns-src" id="nsSrc" role="group" aria-label="Откуда фразы"><button data-s="slovar">Фразы из словаря</button><button data-s="teksty">Фразы из обучения</button></div>
+  <div class="ns-hard"><span>Только сложные</span><button class="sw" id="nsHard" role="switch" aria-checked="false" aria-label="Только сложные фразы"><i></i></button></div>
+  <div class="ns-card" id="nsCard" aria-live="polite">
+    <p class="ns-f" id="nsF"></p>
+    <p class="ns-ru" id="nsRu"></p>
+    <p class="small muted" id="nsPodp"></p>
+  </div>
+  <p class="small muted ns-msg" id="nsMsg"></p>
+  <div class="ns-ctl"><button class="ic" id="nsPlay" aria-label="Слушать"></button><button class="ic" id="nsNext" aria-label="Следующая фраза"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14l9-7z" fill="currentColor"/><path d="M18 5v14"/></svg></button></div>
 </main>
 
 <main id="home" class="hidden">
