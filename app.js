@@ -28,7 +28,7 @@ const RATES = [0.8, 1, 1.5, 2];
 let G = Object.assign({ rate: 1, last: null, mode: 'skor', theme: 'auto', btN: 3 }, read(SKEY) || {});
 if (!RATES.includes(G.rate)) G.rate = G.rate < 1 ? 0.8 : 1;
 /* настройки на сервере — по ключу { v, t }: rate, mode, theme, last, btN (фраз за раз в «Обратном переводе»); pos.<текст> — где остановился; flags — «Неверно?» */
-/* язык обучения — lang; «Продолжить» — свой у каждого языка: last.el, last.en */
+/* язык обучения — lang; последний текст (карточка сверху полки) — свой у каждого языка: last.el, last.en */
 /* lvOff.<язык> — уровни, выключенные учеником: на полке их нет (хранятся выключенные, не включённые — новый уровень появится сам) */
 const G_SYNC = ['rate', 'mode', 'theme', 'lang', 'btN', ...Object.keys(LANGS).flatMap(l => ['last.' + l, 'lvOff.' + l])];
 if (G.last) { const m0 = LIB.find(m => m.id === G.last); if (m0 && !G['last.' + m0.lang]) G['last.' + m0.lang] = G.last; delete G.last; }  /* прежний общий last */
@@ -237,11 +237,14 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
-  if (id !== 'nasluh') nsStop();
+  if (id !== 'nasluh') { nsStop(); NS.wasOn = false; nsDict(null); nsPopClose(); }
   ['shelf', 'settings', 'about', 'nasluh', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
   /* на полке вместо домика — флаг изучаемого языка (нажатие — другой язык) */
   $('goHome').classList.toggle('hidden', id === 'shelf'); $('langFlag').classList.toggle('hidden', id !== 'shelf');
+  /* ⓘ и учётная запись — только на экране настроек (26.11.2026) */
+  $('aboutOpen').classList.toggle('hidden', id !== 'settings'); $('acctOpen').parentNode.classList.toggle('hidden', id !== 'settings');
+  paintWok();
   if (id === 'shelf') renderShelf();
   if (id === 'home') renderHome();
   if (id === 'settings') renderSettings();
@@ -283,7 +286,9 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
     if (fresh) setText(t.id);
     if (force || fresh || !shown(t.v)) t.v === 'home' ? show('home') : t.v === 'bt' ? btOpenAt(btPos()) : t.v === 'ves' ? vesOpen() : skorOpen(S.skorAt);
   }
-  sh ? openSheet(sh) : closeSheet();
+  const nsd = sh && sh.k === 'nsd';
+  nsDict(nsd ? sh : null);
+  sh && !nsd ? openSheet(sh) : closeSheet();
 }
 window.addEventListener('popstate', () => applyLoc());
 
@@ -292,7 +297,7 @@ function renderShelf() {
   /* язык не выбран — сначала выбор; выбран — на полке только его тексты */
   $('langPick').classList.toggle('hidden', !!G.lang);
   $('shelfList').classList.toggle('hidden', !G.lang);
-  $('texts').innerHTML = LIB.filter(onShelf).map(m => {
+  const textHtml = m => {
     const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
     const done = c.g + c.y + c.r;
     return `<button class="text${lastId() === m.id ? ' last' : ''}" data-id="${m.id}">
@@ -303,24 +308,30 @@ function renderShelf() {
       ${done ? squaresHtml(c, n) : ''}
       <span class="tally" aria-hidden="true">${tallyHtml(c, n)}</span>
     </button>`;
-  }).join('');
-  document.querySelectorAll('#texts .text').forEach(b => b.onclick = () => openText(b.dataset.id));
-  const last = LIB.find(m => m.id === lastId());
-  /* «Проверка · N» — фразы, которым подошёл срок, со всех текстов языка; «Слова» — сколько освоено */
+  };
+  /* «Тексты» свёрнуты — список рисуется, только когда раскрыт (по уровням, включённым в настройках: onShelf) */
+  const open = txOpen();
+  $('txFold').setAttribute('aria-expanded', String(open)); $('texts').classList.toggle('hidden', !open);
+  $('texts').innerHTML = open ? LIB.filter(onShelf).map(textHtml).join('') : '';
+  /* сверху — текст, с которым работали последним (Ваше слово 26.11.2026: вместо «Продолжить»); нажатие — сам текст */
+  const last = G.lang && LIB.find(m => m.id === lastId() && (m.lang || 'el') === G.lang);
+  $('lastText').classList.toggle('hidden', !last);
+  $('lastText').innerHTML = last ? textHtml(last) : '';
+  document.querySelectorAll('#texts .text, #lastText .text').forEach(b => b.onclick = () => openText(b.dataset.id));
+  /* плитки — одним шрифтом, только название (26.11.2026); «Проверка · N» — фразы, которым подошёл срок */
   $('shelfTools').classList.toggle('hidden', !G.lang);
   if (G.lang) {
-    const n = dueList().length, w = wordStats();
-    $('chkOpen').innerHTML = `<span>Проверка · ${n}</span><small>${n ? 'пора проверить' : 'на сегодня всё'}</small>`;
+    const n = dueList().length;
+    $('chkOpen').textContent = `Проверка · ${n}`;
     $('chkOpen').disabled = !n;
-    $('wordsOpen').innerHTML = `<span>Слова · ${w.ok}</span><small>освоено</small>`;
   }
   /* «Фразы на блокировке» — история показанных на экране блокировки; сама история — на телефоне, в Android-приложении */
   let andr = false; try { andr = localStorage.getItem('ekmafisi.android') === '1'; } catch (e) {}
-  $('frazaOpen').classList.toggle('hidden', !andr); $('nsOpen').classList.toggle('solo', !andr);
+  $('frazaOpen').classList.toggle('hidden', !andr);
   $('frazaOpen').href = `intent://fraza/istoriya?tema=${themeNow()}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
   $('langFlag').textContent = { el: '🇬🇷', en: '🇬🇧' }[G.lang] || '🌐';
   $('langFlag').setAttribute('aria-label', 'Язык: ' + (G.lang ? LANGS[G.lang].name : 'не выбран') + '. Сменить');
-  /* «Собери» и «Словарь» — только у греческого: карточка над текстами с текущей ступенью */
+  /* «Собрать фразу» (режим «Собери») и «Словарь» — только у греческого; плитка — без ступени (26.11.2026) */
   const sbOn = G.lang === 'el' && !EK.guest;  /* гость: «Собери» нет (ИИ — только своим), «Словарь» есть */
   $('slvOpen').classList.toggle('hidden', G.lang !== 'el');
   $('sbCard').classList.toggle('hidden', !sbOn);
@@ -328,13 +339,22 @@ function renderShelf() {
   const gn = EK.guest && G.lang;
   $('guestNote').classList.toggle('hidden', !gn);
   if (gn) $('guestNote').textContent = (LIB.some(onShelf) ? 'Остальные тексты' : 'Тексты') + ' — по чужим роликам и фильмам, они открыты только своим. Войти — в настройках.';
-  if (sbOn) $('sbCard').innerHTML = `<span class="t">Собери · ${esc(SB.step)}</span><span class="meta2">${esc(ladderOf(SB.step).t)}</span>`;
-  const sbLast = sbOn && G.mode === 'soberi';
-  $('resume').classList.toggle('hidden', !last && !sbLast);
-  if (sbLast) $('resume').innerHTML = `<span>Продолжить · Собери</span><small>ступень ${esc(SB.step)} — ${esc(ladderOf(SB.step).t)}</small>`;
-  else if (last) $('resume').innerHTML = `<span>Продолжить · ${esc(MODE_NAME[G.mode] || MODE_NAME.skor)}</span><small>${esc(TTL(last))}</small>`;
+  paintWok();
 }
-$('resume').onclick = () => { if (G.lang === 'el' && G.mode === 'soberi') { push('soberi'); push('sbgo'); sbGo(SB.step); return; } openText(lastId()); start(G.mode); };
+const TXF = 'ekmafisi-teksty';  /* «Тексты» раскрыты или свёрнуты — как оставили, на этом устройстве */
+const txOpen = () => { try { return localStorage.getItem(TXF) === '1'; } catch (e) { return false; } };
+$('txFold').onclick = () => {
+  const on = !txOpen(); try { localStorage.setItem(TXF, on ? '1' : '0'); } catch (e) {}
+  renderShelf();
+  if (on) requestAnimationFrame(() => $('txFold').scrollIntoView({ block: 'start', behavior: 'smooth' }));
+};
+/* число освоенных слов — в верхней строке рядом с темой, на всех экранах (26.11.2026; плитка «Слова» убрана) */
+function paintWok() {
+  const on = !!G.lang && (!!LIB.length), n = on ? wordStats().ok : 0;
+  $('wOk').classList.toggle('hidden', !on);
+  $('wOk').textContent = n; $('wOk').setAttribute('aria-label', `Освоено ${n} ${plural(n, 'слово', 'слова', 'слов')}`);
+}
+$('wOk').onclick = () => { if (!shown('words')) { push('words'); show('words'); } };
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
 /* --- настройки: всё, что не учёба — язык, тема, учётная запись, итог --- */
 $('setOpen').onclick = () => { push('settings'); show('settings'); };
@@ -421,7 +441,7 @@ $('aboutOpen').onclick = () => { if (!shown('about')) { push('about'); show('abo
 $('acctOpen').onclick = e => { e.stopPropagation(); const h = !$('acctPop').classList.toggle('hidden'); $('acctOpen').setAttribute('aria-expanded', String(h)); };
 document.addEventListener('click', e => { if (!e.target.closest('.acct')) { $('acctPop').classList.add('hidden'); $('acctOpen').setAttribute('aria-expanded', 'false'); } });
 
-function setText(id, quiet) {  /* quiet — для «Проверки»: текст нужен, «Продолжить» не трогаем */
+function setText(id, quiet) {  /* quiet — для «Проверки»: текст нужен, последний текст полки не трогаем */
   const m = LIB.find(x => x.id === id);
   if (M !== m) { M = m; P = m.phrases; CHUNKS = m.chunks; S = progOf(m); }
   if (!quiet) { G['last.' + (m.lang || 'el')] = m.id; saveG(); }
@@ -478,24 +498,6 @@ $('vPlay').onclick = () => toggle($('vPlay'), () => playSeq($('vPlay'), P.map((p
   if (e) { e.classList.add('playing'); e.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
 }));
 
-$('copy').onclick = () => {
-  const lines = [`Экмафиси · ${new Date().toISOString().slice(0, 10)} · скорость: ${RATE_LBL(G.rate)}`];
-  LIB.forEach(m => {
-    const pr = progOf(m); if (!pr.log.length) return;
-    lines.push('', `## ${m.id} — ${m.title}`);
-    m.phrases.forEach(p => {
-      const c = pr.colors[p.id], w = pr.written[p.id];
-      if (c || w) lines.push(`${p.id} ${c ? { g: 'зел', y: 'жёл', r: 'кр' }[c] : '—'}${w ? ' | написал: ' + w : ''}`);
-    });
-    lines.push('Журнал:'); pr.log.forEach(l => lines.push(`${l.t} ${l.p} ${l.m}${l.c ? ' ' + l.c : ''}`));
-  });
-  const flags = read('ekmafisi.etymflags') || {};
-  if (Object.keys(flags).length) { lines.push('', '## Происхождение — «Неверно?»'); Object.keys(flags).forEach(l => lines.push(`${flags[l].t} ${l}: ${flags[l].text}`)); }
-  if (lines.length === 1) lines.push('Пока ничего не отмечено.');
-  const txt = lines.join('\n');
-  const fallback = () => { $('copyWrap').classList.remove('hidden'); $('copyText').value = txt; $('copyText').select(); };
-  try { navigator.clipboard.writeText(txt).then(() => { $('copy').textContent = 'Скопировано'; setTimeout(() => $('copy').textContent = 'Скопировать итог', 2000); }, fallback); } catch (e) { fallback(); }
-};
 $('reset').onclick = () => $('resetWrap').classList.remove('hidden');
 $('resetNo').onclick = () => $('resetWrap').classList.add('hidden');
 $('resetYes').onclick = () => {
@@ -538,9 +540,15 @@ function glossHtml(w, p, k) {
   const g = noteOf(w, L);
   if (g) h += `<div class="small muted">${esc(cap(g))}</div>`;
   /* формы строкой, без названий времён: el — настоящее · παρατατικός · аорист · будущее; en — base · past · participle, только у неправильных */
-  const f = formsOf(L, D);
-  if (f) h += `<div class="el">${esc(f)}</div>` + (L.note ? `<div class="small muted">${esc(cap(L.note))}</div>` : '');
-  else if (base(w.t) !== base(w.l)) h += `<div class="el">${esc(w.l)}</div>`;
+  /* греческое имя (у глагола форм L.forms нет — тоже): краткая таблица — три падежа без звательного или четыре формы
+     (Ваш ответ 26.11.2026, Slovar.kratko); таблицы нет — формы строкой, как было */
+  const f = formsOf(L, D), isEl = (M.lang || 'el') === 'el', note = L.note ? `<div class="small muted">${esc(cap(L.note))}</div>` : '';
+  if (f && (L.forms || !isEl)) h += `<div class="el">${esc(f)}</div>` + note;
+  else {
+    if (base(w.t) !== base(w.l)) h += `<div class="el">${esc(w.l)}</div>`;
+    if (isEl) h += `<div class="kr" data-kr="${esc(w.l)}"${f ? ` data-alt="${esc(f)}"` : ''}></div>`;
+    if (f) h += note;
+  }
   const a = [];
   if (D && D.dict.senses.length) a.push(`<button class="link" data-senses="${esc(w.l)}">Значения</button>`);
   if (a.length) h += `<div class="gl-links">${a.join('<span class="muted">·</span>')}</div>`;
@@ -1117,7 +1125,6 @@ $('slvOpen').onclick = () => { push('slovar'); show('slovar'); slv().show(null);
 
 /* --- «Слова»: сверху — сколько освоено; ниже первая тысяча частотных лемм языка (material/<lang>/chastoty) --- */
 let FREQ = {};
-$('wordsOpen').onclick = () => { push('words'); show('words'); };
 function renderWords() {
   const w = wordStats(), lang = G.lang || 'el';
   langTexts().forEach(loadLex);  /* значения и происхождение — из словарей всех текстов языка */
@@ -1141,7 +1148,8 @@ function renderWord(l) {
   $('eBody').innerHTML = `<div class="e-head"><span class="lem">${esc(x.slovo || l)}</span>
       ${L.ru || D ? `<span>${esc(cap(L.ru || D.dict.senses[0]?.ru || ''))}</span>` : ''}
       <span class="small muted">${x.rank ? `№ ${x.rank} по частоте · ` : ''}${esc(POS_RU[x.pos] || '')}${x.pos ? ' · ' : ''}${st}</span>
-      ${x.forms ? `<span class="el muted">${esc(x.forms.join(' · '))}</span>` : ''}
+      ${(G.lang || 'el') === 'el' ? `<div class="kr" data-kr="${esc(l)}"${x.forms ? ` data-alt="${esc(x.forms.join(' · '))}"` : ''}></div>`
+        : x.forms ? `<span class="el muted">${esc(x.forms.join(' · '))}</span>` : ''}
       ${p ? `<span class="small muted"><span class="el">${esc(TX(p))}</span><br>${esc(p.ru)}</span>` : ''}</div>
     ${D && D.dict.senses.length ? `<div class="gl-links"><button class="link" data-senses="${esc(l)}">Значения</button></div>` : ''}
     ${(G.lang || 'el') === 'el' ? Slovar.etimRow(l, Slovar.etimSync(l)) : ''}`;
@@ -1425,7 +1433,20 @@ $('gPlay').onclick = () => {
   speechSynthesis.speak(u);
 };
 
-/* --- «На слух» (Ваше задание 26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → 8 с → следующая.
+/* --- краткая таблица слова (Slovar.kratko, Ваш ответ 26.11.2026): <div class="kr" data-kr="лемма" [data-head="заголовок"]
+   [data-alt="что показать, если таблицы нет"]> заполняется сам, как только появился в странице — в карточке слова текстов,
+   в окне слова экрана «Слова», в подсказке «На слух». Таблицы — части по слову (≈ 0,5 МБ), без всего словаря --- */
+function krFill(el) {
+  el.dataset.krd = '1';
+  const alt = () => { if (el.dataset.alt) el.innerHTML = `<span class="${el.dataset.head ? '' : 'el muted'}">${esc(el.dataset.alt)}</span>`; };
+  Slovar.kratko(el.dataset.kr).then(h => {
+    if (!h) return alt();
+    el.innerHTML = (el.dataset.head ? `<span class="lem" lang="el">${esc(el.dataset.head)}</span>` : '') + h;
+  }, alt);
+}
+new MutationObserver(() => document.querySelectorAll('[data-kr]:not([data-krd])').forEach(krFill)).observe(document.body, { childList: true, subtree: true });
+
+/* --- «На слух» (Ваше задание 26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → пауза (G.nsPause, 10–120 с) → следующая.
    На экране — фраза и перевод крупно, звучащая строка подсвечена. Откуда фразы — выбор, запоминается (G.nsSrc):
    «из словаря» — примеры статей со звуком Azure, тот же отбор, что у фразы на блокировке (tools/fraza_nabor.py:
    без служебных слов, от 5 слов, от частых) — el/slovar2-primery.json, звук el/zvuk-prim/<голос>/<z>.mp4; только греческий;
@@ -1448,7 +1469,11 @@ async function nsChastoty(lang) {
 const nsRedkih = (t, S) => (t.match(/\p{L}+/gu) || []).filter(w => !S.has(nsNorm(w))).length;
 const NS = { list: null, src: null, k: 0, tok: 0, on: false, a: new Audio(), wake: null, prim: null, ru: undefined, urls: new Map() };
 NS.a.preload = 'auto';
-const NS_PAUSA = [1000, 1000, 8000];  /* после фразы, после перевода, после повтора */
+/* паузы: после фразы 1 с, после перевода 1 с, после повтора — настройкой 10–120 с, шаг 10 (G.nsPause; Ваше слово 26.11.2026:
+   «если повторяешь по несколько раз — нужно много времени») */
+const nsPause = () => Math.min(120, Math.max(10, +G.nsPause || 10));
+const NS_RATES = [1, 0.9, 0.8];  /* скорость речи на языке (G.nsRate); перевод — всегда 1,0 */
+const nsRate = () => NS_RATES.includes(+G.nsRate) ? +G.nsRate : 1;
 const nsSleep = (ms, tok) => new Promise((ok, no) => setTimeout(() => tok === NS.tok ? ok() : no('stop'), ms));
 const nsShuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const nsSrcOk = s => s === 'slovar' ? G.lang === 'el' : true;
@@ -1461,7 +1486,7 @@ async function nsList(src) {
   nsRuIndex();
   if (src === 'slovar') {
     if (!NS.prim) NS.prim = await (await EK.content('el/slovar2-primery.json', navigator.onLine)).json();
-    return nsShuffle(NS.prim.p.map(x => ({ f: x.f, ru: x.ru, podp: x.l, z: `el/zvuk-prim/${NS.prim.g}/${x.z}.mp4` })));
+    return nsShuffle(NS.prim.p.map(x => ({ f: x.f, ru: x.ru, podp: x.l, lem: x.l.split(' — ')[0].replace(/^(?:ο|η|το|οι|τα|ο\/η)\s+/, ''), z: `el/zvuk-prim/${NS.prim.g}/${x.z}.mp4` })));
   }
   const all = LIB.filter(onShelf), started = all.filter(m => progOf(m).log.length);
   return nsShuffle((started.length ? started : all).flatMap(m => m.phrases.map(p => ({ f: TX(p), ru: p.ru, podp: TTL(m), m, p }))));
@@ -1489,7 +1514,7 @@ async function nsBlob(x) {  /* звук фразы: файл примера сл
 function nsSay(x, tok) {  /* фраза на языке: целый файл примера или отрезок файла текста [at, at + длительность] */
   return nsBlob(x).then(url => new Promise((ok, no) => {
     if (tok !== NS.tok) return no('stop');
-    const a = NS.a, rate = x.rate || G.rate || 1;
+    const a = NS.a, rate = x.rate || nsRate();
     if (a.src !== url) a.src = url;
     a.defaultPlaybackRate = a.playbackRate = rate; a.preservesPitch = a.webkitPreservesPitch = true;
     const end = x.p ? x.p.at + (x.p.end - x.p.start) : null;
@@ -1528,16 +1553,37 @@ function nsRuPhone(text, tok) {  /* перевод голосом телефон
     speechSynthesis.speak(u);
   });
 }
+/* фраза — словами: у фраз текстов слово знает свою лемму (words), у фраз словаря — только форму: статья ищется по форме,
+   как в поиске «Словаря». Словарь — греческий; у английского слова не нажимаются */
+const NS_GRW = /[\u0370-\u03ff\u1f00-\u1fff]+/g;
+function nsFHtml(x) {
+  if ((G.lang || 'el') !== 'el') return esc(x.f);
+  const sp = (t, l) => `<span class="nsw" data-l="${esc(l)}">${esc(t)}</span>`;
+  if (!x.p) return esc(x.f).replace(NS_GRW, w => sp(w, w));
+  let h = '', at = 0;
+  x.p.words.forEach(w => {
+    const pos = x.f.indexOf(w.t, at); if (pos < 0) return;
+    h += esc(x.f.slice(at, pos)) + (w.l && NS_GRW.test(w.t) ? sp(w.t, w.l) : esc(w.t)); NS_GRW.lastIndex = 0;
+    at = pos + w.t.length;
+  });
+  return h + esc(x.f.slice(at));
+}
+/* подсказка снизу (Ваш ответ 26.11.2026): у фразы словаря — не значение (оно и так в переводе), а склонение слова статьи —
+   три падежа без звательного, у глагола — четыре формы; таблицы нет — «слово — значение», как было. У фразы текста — название */
+function nsHintHtml(x) {
+  if (x.lem && (G.lang || 'el') === 'el') return `<div class="kr" data-kr="${esc(x.lem)}" data-head="${esc(x.podp.split(' — ')[0])}" data-alt="${esc(x.podp)}"></div>`;
+  return `<span>${esc(x.podp || '')}</span>`;
+}
 function nsPaint() {
-  const x = NS.list && NS.list[NS.k];
-  $('nsF').textContent = x ? x.f : ''; $('nsRu').textContent = x ? x.ru : ''; $('nsPodp').textContent = x ? x.podp : '';
+  const x = NS.list && NS.list[NS.k], k = x ? NS.list.length + ':' + NS.k + ':' + x.f : '';
+  if ($('nsF').dataset.k !== k) {  /* та же фраза — не перерисовывать: подсветка слова и таблица остаются */
+    $('nsF').dataset.k = k;
+    $('nsF').innerHTML = x ? nsFHtml(x) : ''; $('nsRu').textContent = x ? x.ru : ''; $('nsPodp').innerHTML = x ? nsHintHtml(x) : '';
+  }
   $('nsF').lang = G.lang || 'el';
   $('nsPlay').innerHTML = (NS.on ? ICO_PAUSE : ICO_PLAY).replace(/40/g, '34');
   $('nsPlay').setAttribute('aria-label', NS.on ? 'Пауза' : 'Слушать');
-  $('nsHard').setAttribute('aria-checked', String(!!G.nsHard));
-  document.querySelectorAll('#nsSrc button').forEach(b => {
-    b.setAttribute('aria-pressed', String(b.dataset.s === NS.src)); b.disabled = !nsSrcOk(b.dataset.s);
-  });
+  nsBar();
 }
 const nsMark = w => { $('nsF').classList.toggle('on', w === 'f'); $('nsRu').classList.toggle('on', w === 'ru'); };
 async function nsWake(on) {
@@ -1552,9 +1598,9 @@ async function nsLoop() {
   try {
     while (tok === NS.tok) {
       const x = NS.list[NS.k]; nsPaint();
-      nsMark('f'); await nsSay(x, tok); nsMark(''); await nsSleep(NS_PAUSA[0], tok);
-      nsMark('ru'); await nsRu(x.ru, tok); nsMark(''); await nsSleep(NS_PAUSA[1], tok);
-      nsMark('f'); await nsSay(x, tok); nsMark(''); await nsSleep(NS_PAUSA[2], tok);
+      nsMark('f'); await nsSay(x, tok); nsMark(''); await nsSleep(1000, tok);
+      nsMark('ru'); await nsRu(x.ru, tok); nsMark(''); await nsSleep(1000, tok);
+      nsMark('f'); await nsSay(x, tok); nsMark(''); await nsSleep(nsPause() * 1000, tok);
       NS.k = (NS.k + 1) % NS.list.length;
     }
   } catch (e) {
@@ -1583,10 +1629,114 @@ function nsOpen() {
   if (NS.src !== src || !NS.list || NS.lang !== G.lang) { NS.lang = G.lang; nsSetSrc(src); } else nsPaint();
 }
 $('nsOpen').onclick = () => { push('nasluh'); show('nasluh'); };
-document.querySelectorAll('#nsSrc button').forEach(b => b.onclick = () => { if (b.dataset.s === NS.src) return; G.nsSrc = b.dataset.s; saveG(); nsSetSrc(b.dataset.s); });
-$('nsHard').onclick = () => { G.nsHard = !G.nsHard; saveG(); nsSetSrc(NS.src); };
 $('nsPlay').onclick = () => { if (NS.on) nsStop(); else if (NS.list && NS.list.length) nsLoop(); };
-$('nsNext').onclick = () => { if (!NS.list || !NS.list.length) return; const was = NS.on; nsStop(); NS.k = (NS.k + 1) % NS.list.length; nsPaint(); if (was) nsLoop(); };
+function nsGo(d) {  /* следующая (+1) или предыдущая (−1) фраза; играло — играет дальше с неё */
+  if (!NS.list || !NS.list.length) return;
+  const was = NS.on; nsStop(); NS.k = (NS.k + d + NS.list.length) % NS.list.length; nsPaint(); if (was) nsLoop();
+}
+$('nsNext').onclick = () => nsGo(1);
+
+/* нижняя строка (Ваше слово 26.11.2026): скорость · откуда фразы · сложность · пауза — значок со значением; нажатие — окошко
+   выбора над строкой, нажатие мимо — закрыть */
+const NB = {
+  rate: { t: 'Скорость речи на языке', v: () => nsRate().toFixed(1).replace('.', ',') + '×',
+    o: () => NS_RATES.map(r => [r, r.toFixed(1).replace('.', ',')]), cur: () => nsRate(), set: v => { G.nsRate = v; } },
+  src: { t: 'Фразы', v: () => NS.src === 'slovar' ? 'словарь' : 'тексты',
+    o: () => [['slovar', 'из словаря'], ['teksty', 'из обучения']], cur: () => NS.src, off: v => !nsSrcOk(v),
+    set: v => { if (v === NS.src) return; G.nsSrc = v; nsSetSrc(v); } },
+  hard: { t: 'Сложность', v: () => G.nsHard ? 'сложные' : 'обычные',
+    o: () => [[false, 'обычные'], [true, 'только сложные']], cur: () => !!G.nsHard, set: v => { if (v === !!G.nsHard) return; G.nsHard = v; nsSetSrc(NS.src); } },
+  pause: { t: 'Пауза после повтора', v: () => nsPause() + ' с' }
+};
+function nsBar() { document.querySelectorAll('.nsbar .nb').forEach(b => { b.querySelector('b').textContent = NB[b.dataset.nb].v(); }); }
+function nsPopClose() { $('nsPop').classList.add('hidden'); document.querySelectorAll('.nsbar .nb').forEach(b => b.setAttribute('aria-expanded', 'false')); }
+function nsPopOpen(b) {
+  const k = b.dataset.nb, d = NB[k], pop = $('nsPop'), was = b.getAttribute('aria-expanded') === 'true';
+  nsPopClose(); if (was) return;
+  b.setAttribute('aria-expanded', 'true');
+  pop.setAttribute('aria-label', d.t);
+  if (k === 'pause') {
+    pop.innerHTML = `<h3>${d.t}</h3><div class="pv"><input type="range" min="10" max="120" step="10" value="${nsPause()}" aria-label="${d.t}"><b></b></div>`;
+    const r = pop.querySelector('input'), out = pop.querySelector('b');
+    const put = () => { G.nsPause = +r.value; out.textContent = r.value + ' с'; nsBar(); };
+    r.oninput = put; r.onchange = () => { put(); saveG(); }; put();
+  } else {
+    pop.innerHTML = `<h3>${d.t}</h3><div class="seg" role="group">${d.o().map(([v, t], i) => `<button data-i="${i}" aria-pressed="${v === d.cur()}"${d.off && d.off(v) ? ' disabled' : ''}>${t}</button>`).join('')}</div>`;
+    pop.querySelectorAll('button').forEach(x => x.onclick = () => { d.set(d.o()[+x.dataset.i][0]); saveG(); nsBar(); nsPopClose(); });
+  }
+  pop.classList.remove('hidden');
+  const r = b.getBoundingClientRect(), w = pop.offsetWidth;
+  pop.style.left = Math.max(12, Math.min(innerWidth - w - 12, r.left + r.width / 2 - w / 2)) + 'px';
+}
+document.querySelectorAll('.nsbar .nb').forEach(b => b.onclick = e => { e.stopPropagation(); nsPopOpen(b); });
+document.addEventListener('click', e => { if (!e.target.closest('#nsPop, .nsbar')) nsPopClose(); });
+
+/* слово фразы (Ваше слово 26.11.2026): нажать — статья словаря в этом же окне (фраза уезжает вверх, перевод уходит, ниже —
+   статья целиком), подержать — происхождение тем же путём; второе нажатие в любом месте фразы — назад к исходному виду.
+   Каждое открытие — шаг истории (sheet { k: 'nsd' }): системное «назад» и «← к фразе» идут на шаг выше. Пока открыт словарь,
+   звук стоит; вернулись — играет дальше, если играл */
+let NSD = null;
+const nsDictApi = () => NSD || (NSD = Slovar.mount($('nsDict'), {
+  backLbl: 'к фразе',
+  onPick: (l, m) => { push('nasluh', { k: 'nsd', l, m: m || null }); NSD.show(l, m); },
+  onBack: () => history.back()
+}));
+function nsDictOpen(l, m) {
+  if (!$('nasluh').classList.contains('dict')) NS.d0 = depth();
+  if (m === 'etym' && Slovar.etimSync(l)) Slovar.etimZapis(l);
+  push('nasluh', { k: 'nsd', l, m: m || null }); nsDict(history.state.sheet);
+}
+function nsDictClose() {
+  const n = depth() - (NS.d0 ?? depth());
+  if (n > 0) history.go(-n);
+  else { history.replaceState({ d: depth(), sheet: null }, '', location.href); nsDict(null); }
+}
+function nsDict(sh) {
+  const box = $('nasluh'), on = !!sh && shown('nasluh');
+  if (on) {
+    if (!box.classList.contains('dict')) { NS.wasOn = NS.on; nsStop(); nsPopClose(); }
+    box.classList.add('dict'); $('nsDict').classList.remove('hidden');
+    nsDictApi().show(sh.l, sh.m);
+    $('nsF').querySelectorAll('.nsw').forEach(w => w.classList.toggle('sel', w.dataset.l === sh.l));
+  } else if (box.classList.contains('dict')) {
+    box.classList.remove('dict'); $('nsDict').classList.add('hidden');
+    $('nsF').querySelectorAll('.nsw.sel').forEach(w => w.classList.remove('sel'));
+    window.scrollTo(0, 0);
+    if (NS.wasOn && shown('nasluh')) { NS.wasOn = false; nsLoop(); }
+  }
+  NS.wasOn = on ? NS.wasOn : false;
+}
+/* касания фразы: долгое на слове — происхождение; сдвиг пальца вбок — свайп (влево — следующая, вправо — предыдущая) */
+let nsT = null;
+$('nsCard').addEventListener('pointerdown', e => {
+  if (e.button > 0) return;
+  const w = !$('nasluh').classList.contains('dict') && e.target.closest('.nsw');
+  if (w) w.classList.add('hold');
+  nsT = { x: e.clientX, y: e.clientY, w, fired: false, swipe: false, t: w ? setTimeout(() => {
+    nsT.fired = true; w.classList.remove('hold'); nsDictOpen(w.dataset.l, 'etym');
+  }, 450) : 0 };
+});
+$('nsCard').addEventListener('pointermove', e => {
+  if (!nsT || nsT.fired) return;
+  if (Math.hypot(e.clientX - nsT.x, e.clientY - nsT.y) > 10) { clearTimeout(nsT.t); if (nsT.w) nsT.w.classList.remove('hold'); }
+});
+const nsUp = e => {
+  if (!nsT) return;
+  clearTimeout(nsT.t); if (nsT.w) nsT.w.classList.remove('hold');
+  const dx = e.clientX - nsT.x, dy = e.clientY - nsT.y;
+  if (!nsT.fired && e.type === 'pointerup' && Math.abs(dx) > 60 && Math.abs(dx) > 1.5 * Math.abs(dy) && !$('nasluh').classList.contains('dict')) {
+    nsT.swipe = true; nsGo(dx < 0 ? 1 : -1);
+  }
+  const t0 = nsT; setTimeout(() => { if (nsT === t0) nsT = null; }, 350);  /* ближайший click — глотаем, если это был свайп или долгое */
+};
+$('nsCard').addEventListener('pointerup', nsUp);
+$('nsCard').addEventListener('pointercancel', nsUp);
+$('nsCard').addEventListener('contextmenu', e => { if (e.target.closest('.nsw')) e.preventDefault(); });
+$('nsF').addEventListener('click', e => {
+  if (nsT && (nsT.fired || nsT.swipe)) { nsT = null; return; }
+  if ($('nasluh').classList.contains('dict')) { nsDictClose(); return; }
+  const w = e.target.closest('.nsw'); if (w) nsDictOpen(w.dataset.l, null);
+});
 
 /* --- тема: светлая · тёмная (26.11.2026 — без «как в системе»; не выбрана — пока как в системе, первое нажатие выбирает) --- */
 const THEMES = { light: 'светлая', dark: 'тёмная' };

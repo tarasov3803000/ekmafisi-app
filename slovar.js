@@ -165,8 +165,14 @@
   /* таблицы спряжения и склонения — 16 частей по слову (tools/slovar_telefon.py): разбирается только часть открытого
      слова (весь файл — 86 МБ JSON, телефону тяжело), все части — в фоне в кэш, сжатыми: без сети тоже работают */
   const TB = new Map(), tbLoading = new Map();
-  const tbPart = l => [...l].reduce((a, ch) => a + ch.codePointAt(0), 0) % D.ptr.tablicyN;  /* то же — chast_tablic в tools/slovar_telefon.py */
-  const tbFile = i => D.ptr.tablicyF ? D.ptr.tablicyF[i] : `${D.ptr.tablicy}-${String(i).padStart(2, '0')}.json.gz`;  /* у части — свой отпечаток */
+  /* таблицы без словаря (26.11.2026): краткой таблице в карточке слова и в «На слух» хватает версии словаря — 24 МБ статей
+     ради неё не качаются. Словарь открыт — его версия; нет — версия из кэша или с сервера, одна на всё время страницы */
+  let TP = null, tpLoading = null;
+  const tptr = () => D ? D.ptr : TP;
+  const tbPtr = () => tptr() ? Promise.resolve(tptr()) : tpLoading || (tpLoading = caches.open(CACHE).then(pointer)
+    .then(p => (TP = p), e => { tpLoading = null; throw e; }));
+  const tbPart = l => [...l].reduce((a, ch) => a + ch.codePointAt(0), 0) % tptr().tablicyN;  /* то же — chast_tablic в tools/slovar_telefon.py */
+  const tbFile = i => tptr().tablicyF ? tptr().tablicyF[i] : `${tptr().tablicy}-${String(i).padStart(2, '0')}.json.gz`;  /* у части — свой отпечаток */
   async function tbGz(i) {  /* сжатая часть: из кэша, а нет — со связью и в кэш */
     const c = await caches.open(CACHE), k = ckey(tbFile(i));
     let hit = await c.match(k);
@@ -179,7 +185,8 @@
     return hit;
   }
   function tablicy(l) {  /* → блоки таблиц слова или null */
-    if (!D || !(D.ptr.tablicyF || D.ptr.tablicy) || !D.ptr.tablicyN) return Promise.reject(new Error('нет таблиц'));
+    if (!tptr()) return tbPtr().then(() => tablicy(l));
+    if (!(tptr().tablicyF || tptr().tablicy) || !tptr().tablicyN) return Promise.reject(new Error('нет таблиц'));
     const i = tbPart(l);
     if (TB.has(i)) return Promise.resolve(TB.get(i)[l] || null);
     if (!tbLoading.has(i)) tbLoading.set(i, tbGz(i).then(r => new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).json())
@@ -187,8 +194,8 @@
         e => { tbLoading.delete(i); throw e; }));
     return tbLoading.get(i).then(o => o[l] || null);
   }
-  const tbSync = l => { const i = tbPart(l); return TB.has(i) ? (TB.get(i)[l] || null) : undefined; };
-  async function tbVse() { for (let i = 0; i < (D.ptr.tablicyN || 0); i++) await tbGz(i); }
+  const tbSync = l => { if (!tptr()) return undefined; const i = tbPart(l); return TB.has(i) ? (TB.get(i)[l] || null) : undefined; };
+  async function tbVse() { for (let i = 0; i < (tptr().tablicyN || 0); i++) await tbGz(i); }
 
   /* --- происхождение слова (tools/etim_telefon.py, решение 24.11.2026): el/etim.json → el/etim-<отп>.txt.gz, строки
      «лемма \t JSON». Отдельно от словаря: свой указатель, свой кэш, качается целиком один раз (≈ 1,7 МБ), без сети работает.
@@ -629,6 +636,31 @@
     return n.split(/;\s*/).map(seg => chasti(seg).filter(p => !lishnyaya(p)).join(', ')).filter(Boolean).join('; ');
   }
   const glagol = s => (s.p || '').startsWith('глагол');
+  /* краткая таблица (Ваше слово 26.11.2026: «склонение для греческого важнее значения»): существительное и прилагательное —
+     три падежа без звательного (им., род., вин.), прилагательное — по родам, ед. и мн.; глагол — четыре формы строкой.
+     Для карточки слова на всех экранах и подсказки «На слух». → html или '' (таблицы нет или она другого вида) */
+  const KR_PAD = { 'Ονομ.': 'им.', 'Γεν.': 'род.', 'Αιτ.': 'вин.' };
+  const KR_COL = { 'Ενικός': 'ед.', 'Πληθυντικός': 'мн.', 'αρσ.': 'м.', 'θηλ.': 'ж.', 'ουδ.': 'ср.' };
+  const KR_GR = { 'единственное число': 'ед.', 'множественное число': 'мн.' };
+  function kratkoHtml(t) {
+    if (!t) return '';
+    const f = formy4(t);
+    if (f) return `<p class="kr4" lang="el">${f.filter(Boolean).map(x => esc(x[0]).replace(/ /g, '\u00a0')).join(' · ')}</p>`;
+    const bl = t.filter(b => b[3].some(r => r[0] === 'Ονομ.')).slice(0, 2);
+    if (!bl.length) return '';
+    const one = c => esc((c.find(x => !x.startsWith('~')) || c[0] || '—').replace(/^~/, ''));
+    let h = '<table class="kr" lang="el">', cols0 = null;
+    for (const [, ru, cols, rows] of bl) {
+      const gr2 = bl.length > 1 ? KR_GR[ru] || '' : '';
+      if (String(cols) !== cols0) { cols0 = String(cols); h += `<tr><th></th>${cols.map(c => `<th lang="ru">${esc(KR_COL[c] || c)}</th>`).join('')}</tr>`; }
+      rows.filter(r => KR_PAD[r[0]]).forEach((r, k) => {
+        h += `<tr${gr2 && !k && h.includes('<td') ? ' class="kr-gr"' : ''}><th lang="ru">${k || !gr2 ? '' : `<span>${gr2}</span> `}${KR_PAD[r[0]]}</th>${r[1].map(c => `<td>${one(c)}</td>`).join('')}</tr>`;
+      });
+    }
+    return h + '</table>';
+  }
+  /* лемма → краткая таблица (обещание); языки, кроме греческого, — '' */
+  const kratko = l => tablicy(l).then(kratkoHtml);
   /* заметка s.n — по частям (через «;»), решение 25.11.2026: верх статьи — только то, без чего слово употребят неверно
      (аориста нет, только мн., несклон., отлож., безл., падеж после предлога); образцы употребления («προλαβαίνω να + гл. —
      успеть сделать», «μετά από + вин.», «λέω κάτι σε κάποιον») — первыми в «Выражения»; прочая грамматика (формы, варианты,
@@ -871,7 +903,7 @@
       /* слово в заголовке (решение 25.11.2026): касание — словоформы (таблицы) и обратно к статье, долгое — происхождение.
          Значка таблиц нет; что слово нажимается, видно по тонкому пунктиру под ним (на экране таблиц — цветом и сплошной чертой) */
       const h1 = `<h1 lang="el"${s.tb ? ` class="slv-tb1${tab ? ' on' : ''}" role="button" aria-label="${esc(s.s)} — ${tab ? 'к статье' : tbName(s).toLowerCase()}"` : ''}>${esc(s.s)}</h1>`;
-      let h = `<button class="slv-back">← ${tab ? 'к статье' : q.value.trim() ? 'к списку' : 'к поиску'}</button>
+      let h = `<button class="slv-back">← ${tab ? 'к статье' : opts.backLbl || (q.value.trim() ? 'к списку' : 'к поиску')}</button>
         <div class="slv-head">${h1}<button class="slv-say" aria-label="Произнести">${SPK}</button></div>`;
       if (tab) {  /* таблицы — отдельным экраном той же статьи */
         mode = 'tab';
@@ -984,5 +1016,5 @@
   }
 
   window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true),
-    etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true) };
+    etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true), kratko, kratkoHtml };
 })();

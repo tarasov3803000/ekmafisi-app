@@ -78,19 +78,52 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .acct-pop { position: absolute; right: 0; top: 46px; z-index: 6; min-width: 240px; max-width: calc(100vw - 32px); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16); overflow-wrap: anywhere; }
 .acct-pop .btn { min-height: 40px; padding: 8px 14px; justify-self: start; }
 .acct-pop .err:empty, .acct-pop .muted:empty { display: none; }
-/* «На слух»: фраза и перевод крупно; говорящая строка — цветом */
-.tools .solo { grid-column: 1 / -1; }  /* «На слух» один в ряду — во всю ширину (без Android-приложения плитки «Фразы на блокировке» нет) */
+/* «На слух»: фраза и перевод крупно; говорящая строка — цветом. Настройки режима — нижней строкой значков со значением
+   (Ваше слово 26.11.2026: крупные «Фразы из словаря / из обучения» не должны висеть на экране) */
 .tbar .flag { font-size: 28px; line-height: 1; padding: 6px 8px; }
-#nasluh { min-height: 100dvh; align-content: start; }
-.ns-src { justify-self: center; }
-.ns-hard { justify-self: center; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: calc(15px + var(--up)); }
-.ns-card { display: grid; gap: 18px; text-align: center; padding: 24px 4px; min-height: 46vh; align-content: center; }
-.ns-f { font: 600 calc(32px + var(--up))/1.25 var(--f-el); transition: color .2s; }
-.ns-ru { font-size: calc(24px + var(--up)); line-height: 1.3; color: var(--muted); transition: color .2s; }
+#nasluh { min-height: 100dvh; align-content: start; padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+.ns-card { display: grid; gap: 18px; text-align: center; padding: 24px 4px; min-height: 46vh; align-content: center; touch-action: pan-y; user-select: none; -webkit-user-select: none;
+  transition: min-height .28s ease, padding .28s ease, gap .28s ease; }
+.ns-f { font: 600 calc(32px + var(--up))/1.25 var(--f-el); transition: color .2s, font-size .28s ease; }
+.ns-ru { font-size: calc(24px + var(--up)); line-height: 1.3; color: var(--muted); transition: color .2s, opacity .2s; }
 .ns-card .on { color: var(--accent); }
+.nsw { border-radius: 6px; cursor: pointer; }
+.nsw.hold, .nsw.sel { background: var(--accent-soft); }
+.ns-hint { justify-self: center; display: grid; gap: 4px; color: var(--muted); font-size: calc(14px + var(--up)); transition: opacity .2s; }
+.ns-hint .lem { font: 600 calc(16px + var(--up))/1.3 var(--f-el); color: var(--ink); }
+.ns-hint .kr { display: grid; gap: 4px; justify-items: center; }
 .ns-msg { text-align: center; }
 .ns-msg:empty { display: none; }
 .ns-ctl { display: flex; justify-content: center; gap: 24px; }
+/* словарь в том же окне: фраза уезжает вверх, перевод и подсказка уходят, ниже — статья (app/slovar.js без поиска) */
+#nasluh.dict .ns-card { min-height: 0; padding: 4px 4px 0; gap: 0; }
+#nasluh.dict .ns-f { font-size: calc(24px + var(--up)); }
+#nasluh.dict .ns-ru, #nasluh.dict .ns-hint, #nasluh.dict .ns-ctl, #nasluh.dict .ns-msg { display: none; }
+#nsDict .slv-row, #nsDict .slv-st, #nsDict .slv-bar, #nsDict .slv-list { display: none !important; }
+#nsDict { animation: nsUp .28s ease; }
+@keyframes nsUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ns-card, .ns-f { transition: none; } #nsDict { animation: none; } }
+/* нижняя строка: четыре значка со значением; нажатие — окошко выбора над строкой */
+.nsbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--paper); border-top: 1px solid var(--line); padding: 0 8px env(safe-area-inset-bottom); }
+.nsbar > div { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); height: 60px; }
+.nsbar .nb { border: 0; background: none; color: var(--muted); display: grid; justify-items: center; align-content: center; gap: 2px; padding: 4px 2px; border-radius: 10px; min-width: 0; }
+.nsbar .nb b { font-weight: 600; font-size: calc(12px + var(--up) / 2); color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.nsbar .nb[aria-expanded="true"] { background: var(--accent-soft); }
+.nsbar .nb[aria-expanded="true"] b, .nsbar .nb[aria-expanded="true"] svg { color: var(--accent); }
+.nspop { position: fixed; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 6; width: min(300px, calc(100vw - 24px)); background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18); display: grid; gap: 10px; }
+.nspop h3 { margin: 0; font-size: calc(13px + var(--up)); color: var(--muted); font-weight: 600; }
+.nspop .seg { display: flex; } .nspop .seg button { flex: 1; }
+.nspop .pv { display: flex; align-items: center; gap: 12px; } .nspop .pv b { min-width: 3.6em; text-align: right; font-variant-numeric: tabular-nums; }
+.nspop input { flex: 1; height: 32px; accent-color: var(--accent); }
+/* краткая таблица слова: три падежа без звательного; у глагола — четыре формы (Slovar.kratko) */
+table.kr { border-collapse: collapse; font: calc(15px + var(--up))/1.35 var(--f-el); margin: 2px auto 0; }
+table.kr th { font: 600 calc(12px + var(--up)) var(--f-ui); color: var(--muted); text-align: left; padding: 1px 10px 1px 0; white-space: nowrap; }
+table.kr td { padding: 1px 10px 1px 0; color: var(--ink); white-space: nowrap; }
+table.kr tr.kr-gr th, table.kr tr.kr-gr td { padding-top: 6px; }
+table.kr th span { color: var(--accent); }
+.kr4 { font: calc(15px + var(--up))/1.4 var(--f-el); color: var(--ink); }
+.kr:empty { display: none; }
+.gloss table.kr, .e-head table.kr { margin: 2px 0 0; }
 .hidden { display: none !important; }
 .sqs { display: inline-flex; gap: 14px; margin-left: 14px; font-variant-numeric: tabular-nums; vertical-align: middle; }
 .text .sqs { margin-left: 0; font-size: calc(13px + var(--up)); color: var(--muted); }
@@ -112,9 +145,10 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .text .tru { font-size: calc(15px + var(--up)); color: var(--muted); margin-top: -4px; }  /* перевод названия — мелко под оригиналом */
 .text .meta2 { font-size: calc(13px + var(--up)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .text.last { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
-.resume { display: grid; gap: 2px; text-align: left; }
-.resume small { opacity: .85; font-weight: 400; }
-.soberi-card .t { font: 600 calc(21px + var(--up))/1.2 var(--f-el); }
+/* «Тексты» — свёрнуты; нажатие на слово раскрывает список (Ваше слово 26.11.2026) */
+.tx-fold { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 8px 0; font: 600 calc(22px + var(--up))/1.2 var(--f-ui); color: var(--ink); justify-self: start; }
+.tx-fold svg { color: var(--muted); transition: transform .2s; }
+.tx-fold[aria-expanded="true"] svg { transform: rotate(180deg); }
 .steps { display: grid; gap: 8px; }
 .steps button { text-align: left; display: grid; grid-template-columns: 2.6em 1fr auto; gap: 2px 10px; align-items: baseline; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 .steps button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
@@ -125,8 +159,10 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .und { text-decoration: underline wavy var(--r); text-underline-offset: 4px; }
 .sbhint { display: grid; gap: 4px; font-size: calc(15px + var(--up)); }
 .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.tools .btn { display: grid; gap: 0; text-align: left; font-variant-numeric: tabular-nums; }
-.tools .btn small { font-weight: 400; color: var(--muted); font-size: calc(13px + var(--up)); }
+/* плитки одного размера, одним шрифтом, только название (Ваше слово 26.11.2026) */
+.tools .btn { display: flex; align-items: center; text-align: left; font-variant-numeric: tabular-nums; min-height: 72px; font-weight: 600; font-size: calc(16px + var(--up)); line-height: 1.25; }
+/* число освоенных слов — в верхней строке, в зелёной рамке; нажатие — экран «Освоено N слов» */
+.tbar .wok { border: 1.5px solid var(--g); color: var(--g); background: none; border-radius: 999px; padding: 3px 11px; font-weight: 700; font-size: calc(14px + var(--up) / 2); font-variant-numeric: tabular-nums; margin-right: 2px; }
 /* «Слова»: первая тысяча частотных лемм — освоенные зелёные, встреченные в текстах обведены, прочие бледные */
 .wstat { display: grid; gap: 2px; }
 .wstat b { font: 600 calc(26px + var(--up))/1.2 var(--f-el); }
@@ -262,7 +298,6 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .ca { background: var(--y-soft); box-shadow: inset 0 -2px var(--y); }  /* только ударение */
 .bad { background: var(--r-soft); text-decoration: line-through; text-decoration-color: var(--r); }
 .miss { background: var(--r-soft); border-bottom: 2px solid var(--r); }
-.copybox { width: 100%; min-height: 160px; font: calc(13px + var(--up))/1.4 ui-monospace, Menlo, monospace; }
 
 /* словарь в карточке слова и статья о происхождении (долгое нажатие на слово) */
 .w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; border-radius: 3px; }
@@ -331,6 +366,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <button class="icon" id="aboutOpen" aria-label="О программе"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r=".6" fill="currentColor"/></svg></button>
   <span class="acct"><button class="icon" id="acctOpen" aria-label="Учётная запись" aria-expanded="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button>
     <div class="acct-pop hidden" id="acctPop"><p id="acctWho"></p><p class="small muted" id="acctSync"></p><button class="btn" id="signOut">Выйти</button><p class="err" id="signInErr"></p></div></span>
+  <button class="wok hidden" id="wOk" aria-label="Освоено слов"></button>
   <button class="icon" id="theme" aria-label="Тема"></button>
   <button class="icon" id="setOpen" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
 </div></header>
@@ -354,25 +390,25 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <div class="row"><button class="btn" data-lang="el" style="flex:1">Греческий</button><button class="btn" data-lang="en" style="flex:1">Английский</button></div>
     <p class="small muted">Сменить можно в настройках.</p>
   </section>
-  <button class="btn primary wide resume hidden" id="resume" style="min-height:64px"></button>
+  <!-- сверху — текст, с которым работали последним: нажатие открывает сам текст, без входа в режим -->
+  <div class="shelf hidden" id="lastText"></div>
   <div class="tools hidden" id="shelfTools">
     <button class="btn" id="chkOpen"></button>
-    <button class="btn" id="wordsOpen"></button>
-    <button class="btn" id="nsOpen"><span>На слух</span><small>фраза и перевод</small></button>
-    <a class="btn hidden" id="frazaOpen" href="intent://fraza/istoriya#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Фразы на блокировке</span><small>история</small></a>
+    <button class="btn hidden" id="sbCard">Собрать фразу</button>
+    <button class="btn" id="nsOpen">На слух</button>
+    <a class="btn hidden" id="frazaOpen" href="intent://fraza/istoriya#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end">Фразы на блокировке</a>
   </div>
   <button class="slv-open hidden" id="slvOpen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Словарь</span></button>
-  <button class="text soberi-card hidden" id="sbCard"></button>
   <section class="shelf" id="shelfList">
-    <h2>Тексты</h2>
-    <div class="shelf" id="texts"></div>
+    <button class="tx-fold" id="txFold" aria-expanded="false" aria-controls="texts">Тексты<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+    <div class="shelf hidden" id="texts"></div>
     <p class="small muted hidden" id="guestNote"></p>
   </section>
 
 </main>
 
 <main id="settings" class="hidden">
-  <!-- всё на одном экране, строкой «название — выбор» (Ваше слово 26.11.2026); «Как пользоваться» и «Итог» — в окне ⓘ, учётная запись — значок в верхней строке -->
+  <!-- всё на одном экране, строкой «название — выбор» (Ваше слово 26.11.2026); «Как пользоваться» — в окне ⓘ; ⓘ и учётная запись — значками в верхней строке, только на этом экране -->
   <section class="card set">
     <div class="srow"><span>Учу</span><div class="seg" id="setLang" role="group" aria-label="Язык обучения"><button data-lang="el">греческий</button><button data-lang="en">английский</button></div></div>
     <div class="srow" id="setLevelCard"><span>Уровень</span><div class="seg" id="setLevel" role="group" aria-label="Уровни на полке"></div></div>
@@ -395,7 +431,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   </details>
 </main>
 
-<!-- ⓘ — о программе: как пользоваться и итог -->
+<!-- ⓘ — о программе: как пользоваться («Итог» убран 26.11.2026 — прогресс на сервере) -->
 <main id="about" class="hidden">
   <section class="card howto-txt">
       <p>Каждый текст учится тремя способами — любым, в каком хочется порядке:</p>
@@ -404,29 +440,30 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
         <li><b>Обратный перевод</b> — по русскому напишите фразу на языке и сверьте с оригиналом.</li>
         <li><b>Весь текст</b> — прочитайте и послушайте целиком, выучите наизусть.</li>
       </ul>
-      <p><b>На слух</b> (на полке) — фраза, перевод и снова фраза, потом пауза; руки свободны.</p>
+      <p><b>На слух</b> (на полке) — фраза, перевод и снова фраза, потом пауза; руки свободны. Свайп — следующая или предыдущая фраза; слово: нажать — словарь, подержать — происхождение.</p>
       <p>Цвет фразы ставите сами: шапочка — «уже знаю», в обратном переводе — «трудно» и «не знаю».</p>
       <p>Новый текст — только когда сами его откроете. Слово: нажать — перевод, подержать — происхождение. Карточки листаются свайпом влево и вправо.</p>
   </section>
-  <section class="card howto-txt">
-      <h2>Итог</h2>
-      <p class="small muted">Всё отмеченное — цвета фраз, написанное в обратном переводе, журнал занятий и пометки «Неверно?» — одним текстом. Нужен, чтобы прислать разработчику для разбора: скопировали — вставьте в письмо или в чат. Прогресс и так хранится на сервере.</p>
-      <button class="btn" id="copy" style="justify-self:start">Скопировать итог</button>
-      <div id="copyWrap" class="hidden"><p class="small">Скопируйте текст вручную:</p><textarea class="copybox" id="copyText" readonly></textarea></div>
-  </section>
 </main>
 
-<!-- «На слух» (26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → 8 с → следующая -->
+<!-- «На слух» (26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → пауза (10–120 с) → следующая.
+     Слово фразы: нажать — статья словаря здесь же, подержать — происхождение; свайп — следующая / предыдущая -->
 <main id="nasluh" class="hidden">
-  <div class="seg ns-src" id="nsSrc" role="group" aria-label="Откуда фразы"><button data-s="slovar">Фразы из словаря</button><button data-s="teksty">Фразы из обучения</button></div>
-  <div class="ns-hard"><span>Только сложные</span><button class="sw" id="nsHard" role="switch" aria-checked="false" aria-label="Только сложные фразы"><i></i></button></div>
   <div class="ns-card" id="nsCard" aria-live="polite">
     <p class="ns-f" id="nsF"></p>
     <p class="ns-ru" id="nsRu"></p>
-    <p class="small muted" id="nsPodp"></p>
+    <div class="ns-hint" id="nsPodp"></div>
   </div>
   <p class="small muted ns-msg" id="nsMsg"></p>
   <div class="ns-ctl"><button class="ic" id="nsPlay" aria-label="Слушать"></button><button class="ic" id="nsNext" aria-label="Следующая фраза"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14l9-7z" fill="currentColor"/><path d="M18 5v14"/></svg></button></div>
+  <div id="nsDict" class="hidden"></div>
+  <nav class="nsbar" aria-label="Настройки «На слух»"><div>
+    <button class="nb" data-nb="rate" aria-expanded="false" aria-label="Скорость речи"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 14 4-5"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/></svg><b></b></button>
+    <button class="nb" data-nb="src" aria-expanded="false" aria-label="Откуда фразы"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><b></b></button>
+    <button class="nb" data-nb="hard" aria-expanded="false" aria-label="Сложность"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 20 6-10 4 6 3-4 5 8z"/></svg><b></b></button>
+    <button class="nb" data-nb="pause" aria-expanded="false" aria-label="Пауза после повтора"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12M6 22h12M7 2v3l5 7-5 7v3M17 2v3l-5 7 5 7v3"/></svg><b></b></button>
+  </div></nav>
+  <div class="nspop hidden" id="nsPop" role="dialog"></div>
 </main>
 
 <main id="home" class="hidden">
