@@ -21,7 +21,9 @@
 (() => {
   const CACHE = 'ekmafisi-slovar-v1', ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = 'el/slovar2.json', RECENT = 'ekmafisi.slovar.nedavno';
   const VKL = 'slovar-vkladka';  /* открытая вкладка пустого поиска: n — недавние, i — избранные */
-  const RECENT2 = 'ekmafisi.slovar.nedavno2';  /* недавние со строкой списка { l, s, b } — видны, пока словарь открывается */
+  const RECENT2 = 'ekmafisi.slovar.nedavno2';
+  const STATEY = 'ekmafisi.slovar.statey';  /* число статей — для строки в настройках, и пока словарь не открыт */
+  const HIST_MAX = 5000;  /* история поиска на главной — вся (27.11.2026; было 30); предел — только чтобы не упереться в память браузера (~1 МБ) */  /* недавние со строкой списка { l, s, b } — видны, пока словарь открывается */
   const SKOR = 'slovar-skorost';  /* скорость голоса 0,6–1,2 ползунком (17.11.2026: по умолчанию 0,9; 25.11.2026: ползунок), общая с Экмафиси */
   const ckey = p => new URL('slovar/' + p, location.origin + '/').href;  /* ключ кэша — один на оба приложения (один адрес github.io) */
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -450,10 +452,11 @@
   /* --- вид --- */
   const CSS = `
 .slv { display: grid; gap: 14px; }
-.slv > *, .slv-art > *, .slv-art li, .slv-ph > div { min-width: 0; }  /* ни одно длинное слово не делает страницу шире экрана: сетка ужимается, слово переносится */
+.slv > *, .slv-lev > *, .slv-art > *, .slv-art li, .slv-ph > div { min-width: 0; }  /* ни одно длинное слово не делает страницу шире экрана: сетка ужимается, слово переносится */
 .slv-q { width: 100%; font: calc(18px + var(--up, 0px)) var(--f-ui); padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); }
 .slv-q:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .slv-st { font-size: calc(14px + var(--up, 0px)); color: var(--muted); margin: 0; }
+.slv-st:empty { display: none; }
 .slv-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .slv-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
 .slv-list { display: grid; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
@@ -493,8 +496,8 @@
 .slv-head h1.slv-tb1 { cursor: pointer; padding-bottom: .14em; text-decoration: underline dotted var(--muted); text-decoration-thickness: max(1.5px, .05em); text-underline-offset: .16em; -webkit-tap-highlight-color: transparent; border-radius: 4px; }
 .slv-head h1.slv-tb1.on { color: var(--accent); text-decoration-style: solid; text-decoration-color: var(--accent); }
 .slv-head h1.slv-tb1:active { background: var(--accent-soft); }
-.slv-head .slv-say { margin-left: auto; }
-.slv-say { flex: none; width: 1.3em; height: 1.3em; border: 0; border-radius: .3em; background: var(--accent-soft); color: var(--accent); display: inline-grid; place-items: center; padding: 0; cursor: pointer; font-size: inherit; }
+.slv-head h1 + button { margin-left: auto; }  /* значки (Е/П, 🔊) — к правому краю */
+.slv-say { flex: none; width: 1.15em; height: 1.15em; border: 0; border-radius: .26em; background: var(--accent-soft); color: var(--accent); display: inline-grid; place-items: center; padding: 0; cursor: pointer; font-size: inherit; }
 .slv-say svg { width: 62%; height: 62%; }
 .slv-say.on { background: var(--accent); color: var(--accent-ink); }
 /* строка под словом — всегда одна: часть речи (цветная подложка), транскрипция, частота; не влезает — кегль не растёт */
@@ -526,11 +529,28 @@
 .slv-w { cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
 .slv-w:active, .slv-w.on { background: var(--accent-soft); }
 .slv-head button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-.slv-tbs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+/* название блока: греческое и русское одним кеглем, разным начертанием (27.11.2026; было — русское мелкое, «тулилось» к греческому);
+   у глагола русское — только на широком (на телефоне не влезало, 25.11.2026); не влезает в строку — переносится целиком */
+.slv-tbs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); container-type: inline-size; }
 .slv-tbs h2.slv-voice { grid-column: 1 / -1; margin: 8px 0 -4px; }
 .slv-tb { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
-.slv-tb h3 { margin: 0 0 6px; font: 700 calc(16px + var(--up, 0px)) var(--f-el); }
-.slv-tb h3 span { font: 400 calc(13px + var(--up, 0px)) var(--f-ui); color: var(--muted); margin-left: 4px; }
+.slv-tb h3 { margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: .6em; font: 700 calc(16px + var(--up, 0px))/1.3 var(--f-el); }
+.slv-tb h3 .ru { font: 400 calc(16px + var(--up, 0px))/1.3 var(--f-ui); color: var(--muted); }
+@container (max-width: 439px) { .slv-tbg h3 .ru { display: none; } }
+.slv-tbp thead th { font-weight: 600; }
+.slv-tbstr { grid-column: 1 / -1; display: grid; gap: 4px; padding: 2px 2px 0; }
+.slv-tbstr p { margin: 0; font-size: calc(16px + var(--up, 0px)); }
+.slv-tbstr .k { color: var(--muted); }
+.slv-tbstr [lang="el"] { font: calc(17px + var(--up, 0px)) var(--f-el); }
+.slv-tbstr small { font-size: .8em; color: var(--muted); }
+/* переключатель залога Е/П — рядом с 🔊, оба в высоту строки заголовка (27.11.2026) */
+.slv-zal { flex: none; width: 1.15em; height: 1.15em; border: 0; border-radius: .26em; background: var(--accent-soft); color: var(--accent); padding: 0; cursor: pointer; display: inline-grid; place-items: center; font-size: inherit; -webkit-tap-highlight-color: transparent; }
+.slv-zal span { font: 700 .56em/1 var(--f-ui); }
+.slv-zal:active { background: var(--accent); color: var(--accent-ink); }
+/* шеврон «наверх» — когда прокрутили вниз (27.11.2026): над страницей сверху посередине, плавно к началу */
+.slv-up { position: fixed; z-index: 6; top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -6px); width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; padding: 0; cursor: pointer; box-shadow: 0 3px 12px rgb(0 0 0 / .16); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; -webkit-tap-highlight-color: transparent; }
+.slv-up.on { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+.slv-up svg { width: 22px; height: 22px; }
 .slv-tb table { border-collapse: collapse; width: 100%; font: calc(16px + var(--up, 0px))/1.35 var(--f-el); }
 .slv-tb th { text-align: left; font: 600 calc(12px + var(--up, 0px)) var(--f-ui); color: var(--muted); padding: 5px 8px 3px 0; white-space: nowrap; vertical-align: top; }
 .slv-tb tbody th { width: 5.6em; }  /* столбец форм — на одном месте во всех блоках */
@@ -605,20 +625,96 @@
 .ety-row .g { font: calc(15px + var(--up, 0px))/1.45 var(--f-el); color: var(--muted); }
 .slv-art.ety-on { background: none; border: 0; padding: 0; }
 .slv-w.hold, .slv-head h1.hold, .slv-list button.hold, .ety-w.hold { background: var(--accent-soft); }
+/* --- широкий экран (решение 27.11.2026). Левая панель (поиск, список) на узком — как её нет (display: contents): телефон прежний.
+   От 1000 px у главного словаря (opts.dve: экран «Словарь» Экмафиси, приложение «Словарь») — две панели: слева поиск и список
+   (свой столбец, своя прокрутка, на месте), справа статья; «← к списку» не нужна. От 1360 px таблицы — рядом со статьёй (.slv-2).
+   Времена глагола на широком — одной таблицей «лица × времена» (.slv-tbm), название времени над столбцом: греческое и русское
+   одним кеглем, разным начертанием */
+.slv-lev { display: contents; }
+.slv-tbm { grid-column: 1 / -1; }
+.slv-tbm table { width: 100%; max-width: 720px; font-size: calc(15px + var(--up, 0px)); }  /* столбец — по самому длинному слову, переносы — по словам */
+.slv-tbm td, .slv-tbm thead th { overflow-wrap: break-word; }
+.slv-tbm thead th { white-space: normal; vertical-align: bottom; padding: 0 10px 6px 0; font: 700 calc(14px + var(--up, 0px))/1.3 var(--f-el); color: var(--ink); }
+.slv-tbm thead th .ru { display: block; font: 400 calc(14px + var(--up, 0px))/1.3 var(--f-ui); color: var(--muted); }
+.slv-tbm tbody th { width: 3.6em; }
+.slv-tbm td { padding: 4px 10px 4px 0; }
+.slv-tbm tbody tr + tr > * { border-top: 1px solid var(--line); }
+.slv-art.slv-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 620px); column-gap: 28px; align-items: start; }
+.slv-art.slv-2 > .slv-osn { display: grid; gap: 12px; min-width: 0; }
+.slv-art.slv-2 > .slv-osn > * { min-width: 0; }
+.slv-art.slv-2 > .slv-bok { min-width: 0; display: grid; gap: 12px; }
+@media (min-width: 1000px) {
+  .slv.dve { grid-template-columns: 300px minmax(0, 1fr); column-gap: 28px; align-items: start; }
+  .slv.dve > .slv-lev { display: grid; gap: 12px; align-content: start; grid-template-rows: auto auto auto minmax(0, 1fr); position: sticky; top: var(--slv-top, 16px); max-height: calc(100vh - var(--slv-top, 16px) - 16px); }
+  .slv.dve .slv-list { overflow-y: auto; overscroll-behavior: contain; }
+  .slv.dve .slv-list .t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .slv.dve .slv-list button:hover { background: var(--paper); }
+  .slv.dve .slv-list button.cur { background: var(--accent-soft); }
+  .slv.dve .slv-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .slv.dve > .slv-art { grid-column: 2; }
+  .slv.dve .slv-bl { display: none; }
+  .slv.dve:has(> .slv-art.hidden)::after { content: 'Статья откроется здесь'; grid-column: 2; grid-row: 1; color: var(--muted); padding: 18px 4px; }
+}
 `;
   const ANDROID = /android/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent);
   const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
   const tbName = s => (s.p || '').startsWith('глагол') ? 'Спряжение' : 'Склонение';
-  function tbHtml(bloki) {
+  /* спряжение (Ваше слово 27.11.2026): без повторов — длительное будущее (θα + настоящее), сослагательные (να + настоящее/аорист;
+     однократное = однократное будущее без θα), перфектные (έχω/είχα/θα έχω/να έχω + инфинитив) не показываются; повелительное —
+     одной таблицей (длительное и однократное — столбцами); причастие и инфинитив — строками. Данные таблиц прежние: отбор при отрисовке */
+  const TB_NET = new Set(['Εξακολουθητικός μέλλοντας', 'Παρακείμενος', 'Υπερσυντέλικος', 'Συντελεσμένος μέλλοντας',
+    'Υποτακτική ενεστώτα', 'Υποτακτική αορίστου', 'Υποτακτική παρακειμένου']);
+  const TB_PROST = { 'Προστακτική εξακολουθητική': 'длительное', 'Προστακτική στιγμιαία': 'однократное' };
+  const TB_STROKA = { 'Μετοχή': 'Причастие', 'Απαρέμφατο': 'Инфинитив' };
+  const PAS = 'Παθητική φωνή';
+  const LICA = ['εγώ', 'εσύ', 'αυτός', 'εμείς', 'εσείς', 'αυτοί'];
+  /* залоги глагола в порядке таблиц (у -μαι страдательный первым); один залог или не глагол — [] */
+  const zalogi = t => { const v = [...new Set((t || []).filter(b => b[3].length && b[2].length === 1 && b[2][0]).map(b => b[2][0]))]; return v.length > 1 ? v : []; };
+  const zalBukva = v => v === PAS ? 'П' : 'Е';
+  const zalBtn = (vs, v) => vs.length > 1 ? `<button class="slv-zal" data-v="${esc(v)}" data-o="${esc(vs.find(x => x !== v))}" aria-label="Залог: ${v === PAS ? 'страдательный' : 'действительный'} — сменить" data-tip="${v === PAS ? 'Страдательный' : 'Действительный'} залог"><span>${zalBukva(v)}</span></button>` : '';
+  /* zal — показать только этот залог (переключатель Е/П), null — все. Каждый блок — <section class="slv-tb" data-v="время" data-z="залог"> */
+  function tbHtml(bloki, zal, setka) {  /* setka — широкий экран: времена одного залога одной таблицей «лица × времена» */
     let h = '<div class="slv-tbs">', voice = null;
-    for (const [zag, ru, cols, rows] of bloki) {
+    const vremya = (b, z) => b[2].length === 1 && b[2][0] === z && b[3].length && !TB_NET.has(b[0]) && !TB_PROST[b[0]] && !b[3].every(r => TB_STROKA[r[0]]);
+    const lk = b => b[3].map(r => r[0]).join('|'), vSetke = new Set();
+    const cell = c => c.map(f => f.startsWith('~') ? `<small>${esc(f.slice(1))}</small>` : esc(f)).join(', ');
+    const tr = (r, cells) => `<tr><th>${esc(r)}</th>${cells.map(c => `<td>${c ? cell(c) : ''}</td>`).join('')}</tr>`;
+    const sec = (zag, ru, z, inner, kl) => `<section class="slv-tb${kl || ''}" data-v="${esc(zag)}" data-z="${esc(z)}"><h3><span lang="el">${esc(zag)}</span>${ru ? `<span class="ru">${esc(ru)}</span>` : ''}</h3><table lang="el">${inner}</table></section>`;
+    for (let i = 0; i < bloki.length; i++) {
+      const [zag, ru, cols, rows] = bloki[i];
       if (!rows.length) { h += `<p class="slv-tbnote" lang="ru">${esc(ru)}</p>`; continue; }  /* «составлено по образцу …», «таблица слова …» */
-      const glagol = cols.length === 1;
-      if (glagol && cols[0] && cols[0] !== voice) { voice = cols[0]; h += `<h2 class="slv-voice">${esc(voice)}</h2>`; }
-      const cell = c => c.map(f => f.startsWith('~') ? `<small>${esc(f.slice(1))}</small>` : esc(f)).join(', ');
-      h += `<section class="slv-tb"><h3 lang="el">${esc(zag)}${glagol ? '' : `<span>${esc(ru)}</span>`}</h3><table lang="el">`  /* у глагола перевод времени не влезал (25.11.2026) */
-        + (!glagol ? `<thead><tr><th></th>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>` : '')
-        + '<tbody>' + rows.map(([r, cells]) => `<tr><th>${esc(r)}</th>${cells.map(c => `<td>${cell(c)}</td>`).join('')}</tr>`).join('') + '</tbody></table></section>';
+      const gl = cols.length === 1, z = gl ? cols[0] : '';
+      if (gl && zal && z !== zal) continue;
+      if (gl && TB_NET.has(zag)) continue;
+      if (gl && z && z !== voice) { voice = z; h += `<h2 class="slv-voice">${esc(voice)}</h2>`; }
+      if (gl && TB_PROST[zag]) {  /* повелительное: оба вида одной таблицей — второй блок того же залога подбирается сюда */
+        const pr = bloki.filter(b => TB_PROST[b[0]] && b[2][0] === z && b[3].length);
+        if (pr[0] !== bloki[i]) continue;
+        const lica = [...new Set(pr.flatMap(b => b[3].map(r => r[0])))].sort((a, b) => LICA.indexOf(a) - LICA.indexOf(b));
+        const kol = pr.map(b => new Map(b[3].map(r => [r[0], r[1][0]])));
+        h += sec('Προστακτική', '', z, `<thead><tr><th></th>${pr.map(b => `<th lang="ru">${TB_PROST[b[0]]}</th>`).join('')}</tr></thead><tbody>`
+          + lica.map(r => tr(r, kol.map(m => m.get(r)))).join('') + '</tbody>', ' slv-tbp');
+        continue;
+      }
+      if (vSetke.has(bloki[i])) continue;
+      if (gl && setka && vremya(bloki[i], z)) {  /* первое время залога — вся сетка; строки лиц у всех одни и те же, иначе — блоками, как на телефоне */
+        const vr = bloki.filter(b => vremya(b, z));
+        if (vr.length > 1 && vr.every(b => lk(b) === lk(vr[0]))) {
+          vr.forEach(b => vSetke.add(b));
+          h += `<section class="slv-tb slv-tbm" data-z="${esc(z)}"><table lang="el"><thead><tr><th></th>${vr.map(b => `<th><span lang="el">${esc(b[0])}</span>${b[1] ? `<span class="ru" lang="ru">${esc(b[1])}</span>` : ''}</th>`).join('')}</tr></thead><tbody>`
+            + vr[0][3].map((r, k) => tr(r[0], vr.map(b => b[3][k][1][0]))).join('') + '</tbody></table></section>';
+          continue;
+        }
+      }
+      if (gl && rows.every(r => TB_STROKA[r[0]])) {  /* «Причастие — …», «Инфинитив — …»; в действительном — без форм страдательного
+           (Викисловарь кладёт γραμμένος и γραφτεί и туда) */
+        const pb = z !== PAS && bloki.find(b => b[0] === zag && b[2][0] === PAS), pf = r => new Set(pb ? (pb[3].find(x => x[0] === r) || [, [[]]])[1][0] : []);
+        const bez = (r, c) => { const p = pf(r), o = c.filter(f => !p.has(f)); return o.length ? o : c; };
+        h += `<div class="slv-tbstr" data-v="${esc(zag)}" data-z="${esc(z)}">` + rows.map(([r, cells]) => `<p><span class="k">${TB_STROKA[r]}</span> — <span lang="el">${cell(bez(r, cells[0]))}</span></p>`).join('') + '</div>';
+        continue;
+      }
+      h += sec(zag, ru, z, (!gl ? `<thead><tr><th></th>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>` : '')
+        + '<tbody>' + rows.map(([r, cells]) => tr(r, cells)).join('') + '</tbody>', gl ? ' slv-tbg' : '');
     }
     return h + '</div>';
   }
@@ -761,34 +857,57 @@
   function mount(root, opts) {
     css();
     /* поле без подсказок: нестандартное name/id, autocomplete/autocorrect выкл. — Chrome не подставляет прошлые вводы, клавиатура не правит */
-    root.innerHTML = `<div class="slv${ANDROID ? ' android' : ''}">
+    root.innerHTML = `<div class="slv${ANDROID ? ' android' : ''}${opts.dve ? ' dve' : ''}"><div class="slv-lev">
       <div class="slv-row"><input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="Греческое или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other"></div>
       <p class="slv-st"></p><div class="slv-bar hidden"><i></i></div>
-      <div class="slv-list"></div>
+      <div class="slv-list"></div></div>
       <article class="slv-art hidden"></article></div>`;
     root.style.minWidth = '0';  /* и в сетке страницы-хозяина */
     if (opts.aside) root.querySelector('.slv-row').appendChild(opts.aside);  /* шестерёнка приложения — в строку поиска, справа */
     const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
     const artY = new Map();  /* статья → прокрутка, когда ушли из неё в другую: «назад» — на то же место */
+    /* клавиатура не вылезает при возврате в приложение (27.11.2026): уходя, поле поиска теряет фокус — иначе телефон, вернувшись,
+       снова поднимает клавиатуру над полем, в котором остался курсор. Фокус по нажатию на поле — как прежде */
+    const bezFokusa = () => { const a = document.activeElement; if (a && root.contains(a) && a.matches('input')) a.blur(); };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') bezFokusa(); });
+    addEventListener('pagehide', bezFokusa);
+    const zal = { l: null, v: null };  /* выбранный залог таблиц этой статьи */
     let res = [], shown = 100, cur = null, curS = null, want = null, listY = 0, mode = null, wantM = null, showTok = 0, hist = false;  /* hist — открыта история просмотров */
+    /* широкий экран (27.11.2026): dva — две панели (список на виду и при открытой статье), bok — таблицы рядом со статьёй,
+       setka — времена глагола одной таблицей (и в окне статьи поверх страницы, когда оно шире 600 px) */
+    const MQ = matchMedia('(min-width: 1000px)'), MQ2 = matchMedia('(min-width: 1360px)');
+    const dva = () => !!opts.dve && MQ.matches, bok = () => dva() && MQ2.matches, setka = () => MQ.matches && (!!opts.dve || root.clientWidth >= 600);
     /* шрифт сменили, экран повернули, шрифт догрузился — заголовок и строку под ним заново */
     const refit = () => { if (cur) { fitHead(art.querySelector('.slv-head'), art); fitMeta(art.querySelector('.slv-meta')); } };
     if (window.ResizeObserver) new ResizeObserver(refit).observe($('.slv-row')); else addEventListener('resize', refit);  /* строка поиска меняется с шириной и шрифтом, но не от подбора кегля */
     if (document.fonts) document.fonts.ready.then(refit);
+    /* шеврон «наверх» (27.11.2026): прокрутили ниже полутора строк экрана — сверху посередине; нажатие — плавно к началу.
+       Прокручивается окно (экран «Словарь», приложение «Словарь») или окно поверх (статья из карточки слова Экмафиси, .sheet) */
+    const UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
+    const up = Object.assign(document.createElement('button'), { className: 'slv-up', innerHTML: UP, tabIndex: -1 });
+    up.setAttribute('aria-label', 'Наверх'); root.firstElementChild.appendChild(up);
+    const skrol = () => { for (let e = root.parentElement; e && e !== document.body; e = e.parentElement) { const o = getComputedStyle(e).overflowY; if (o === 'auto' || o === 'scroll') return e; } return null; };
+    const upCheck = () => { const sc = skrol(), y = sc ? sc.scrollTop : window.scrollY; up.classList.toggle('on', y > Math.max(300, innerHeight * .6) && root.offsetParent !== null); };
+    document.addEventListener('scroll', upCheck, { passive: true, capture: true });
+    function naverh(plavno) { const sc = skrol(); (sc || window).scrollTo({ top: 0, behavior: plavno ? 'smooth' : 'auto' }); }
+    up.addEventListener('click', () => naverh(true));
 
-    const status = () => { st.textContent = D ? `${num(D.ptr.n || D.n)} статей · ищется по-гречески, латиницей и по-русски` : ''; };
-    function drawList() {
+    /* под полем — только загрузка и ошибки; число статей — в настройках (Ваше слово 27.11.2026; Slovar.opisanie) */
+    const status = () => { st.textContent = ''; if (D) try { localStorage.setItem(STATEY, String(D.ptr.n || D.n)); } catch (e) {} };
+    const markCur = () => list.querySelectorAll('button[data-l]').forEach(b => b.classList.toggle('cur', b.dataset.l === cur));
+    const drawList = () => { drawList0(); markCur(); };
+    function drawList0() {
       const val = q.value.trim();
-      if (!val) {  /* «Недавние» — из памяти телефона, видны и пока словарь открывается */
+      if (!val) {  /* «История» — вся история поиска (открытые статьи), из памяти телефона; видна и пока словарь открывается */
         let rec = readJ(RECENT2) || [];
         if (!rec.length && D) {  /* прежний список (только леммы) — один раз в новый */
           rec = (readJ(RECENT) || []).map(by).filter(i => i !== undefined).map(rowOf);
           if (rec.length) try { localStorage.setItem(RECENT2, JSON.stringify(rec)); } catch (e) {}
         }
         const iz = izbr(), vk = iz.length && (readJ(VKL) || 'n') === 'i' ? 'i' : 'n';  /* вкладки — когда есть избранные */
-        const shap = iz.length ? `<div class="slv-vk"><button data-vkl="n" aria-pressed="${vk === 'n'}">${rec.length ? 'Недавние' : 'Самые частые'}</button><button data-vkl="i" aria-pressed="${vk === 'i'}">Избранные · ${iz.length}</button></div>` : '';
+        const shap = iz.length ? `<div class="slv-vk"><button data-vkl="n" aria-pressed="${vk === 'n'}">${rec.length ? 'История · ' + num(rec.length) : 'Самые частые'}</button><button data-vkl="i" aria-pressed="${vk === 'i'}">Избранные · ${iz.length}</button></div>` : '';
         list.innerHTML = vk === 'i' ? shap + iz.map(rowHtml).join('')
-          : rec.length ? (shap || '<h3>Недавние</h3>') + rec.map(rowHtml).join('')
+          : rec.length ? (shap || `<h3>История · ${num(rec.length)}</h3>`) + rec.map(rowHtml).join('')
           : D ? (shap || '<h3>Самые частые</h3>') + chastye(50).map(i => rowHtml(rowOf(i))).join('') : shap;
         return;
       }
@@ -801,10 +920,26 @@
     window.addEventListener('slovar-novoe', () => { status(); if (!cur) { if (q.value.trim()) { res = search(q.value); drawList(); } else drawList(); } });
     let t = 0;
     q.addEventListener('input', () => {
-      if (cur || hist) { cur = null; curS = null; hist = false; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
+      if ((cur || hist) && !dva()) { cur = null; curS = null; hist = false; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
       clearTimeout(t); t = setTimeout(run, 120);
     });
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && res.length) { q.blur(); pick(row(res[0]).l); } });
+    /* клавиатура компьютера (две панели): ↓ из поля — в список, ↑↓ по списку, Enter — статья, Esc — в поле; буква где угодно — в поиск */
+    const knopki = () => [...list.querySelectorAll('button[data-l]')];
+    q.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && dva()) { const b = knopki()[0]; if (b) { e.preventDefault(); b.focus(); } } });
+    list.addEventListener('keydown', e => {
+      if (!dva()) return;
+      const k = knopki(), i = k.indexOf(document.activeElement); if (i < 0) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const j = i + (e.key === 'ArrowDown' ? 1 : -1); if (j < 0) q.focus(); else if (k[j]) k[j].focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); q.focus(); }
+    });
+    document.addEventListener('keydown', e => {
+      if (!dva() || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || e.key === ' ') return;
+      const a = document.activeElement;
+      if (a && a.matches('input, textarea, select, [contenteditable="true"]')) return;
+      if (root.offsetParent === null || document.querySelector('.sheet:not(.hidden)')) return;  /* экран словаря не на виду или окно поверх */
+      q.focus({ preventScroll: true }); q.select();  /* набранная буква — новым запросом */
+    });
     list.addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.more) { shown += 100; drawList(); return; }
@@ -872,6 +1007,15 @@
         if (mode === 'tab') opts.onBack ? opts.onBack() : api.show(cur); else pick(cur, 'tab');
         return;
       }
+      const zb = e.target.closest('.slv-zal');
+      if (zb && cur) {  /* залог: на экране таблиц — сменить на месте (к началу таблиц); в статье — сразу таблицы другого залога */
+        zal.l = cur; zal.v = zb.dataset.o;
+        const bk = mode === null && art.querySelector('.slv-bok'), t = bk && tbSync(cur);
+        if (mode === 'tab') { article(cur, 'tab', curS); naverh(false); }
+        else if (t) { bk.innerHTML = `<h2>${tbName(curS)}</h2>` + tbHtml(t, zal.v, true); zb.outerHTML = zalBtn(zalogi(t), zal.v); }
+        else pick(cur, 'tab');
+        return;
+      }
       if (!cur || !curS) return;
       const s = curS;
       const zv = e.target.closest('.slv-star');
@@ -890,6 +1034,7 @@
 
     function article(l, m, s) {
       curS = s;
+      art.classList.remove('slv-2');
       art.classList.toggle('ety-on', m === 'etym');
       if (m === 'etym') {  /* статья о происхождении — отдельным экраном той же статьи: «←» — к статье словаря */
         mode = 'etym';
@@ -907,12 +1052,18 @@
       /* слово в заголовке (решение 25.11.2026): касание — словоформы (таблицы) и обратно к статье, долгое — происхождение.
          Значка таблиц нет; что слово нажимается, видно по тонкому пунктиру под ним (на экране таблиц — цветом и сплошной чертой) */
       const h1 = `<h1 lang="el"${s.tb ? ` class="slv-tb1${tab ? ' on' : ''}" role="button" aria-label="${esc(s.s)} — ${tab ? 'к статье' : tbName(s).toLowerCase()}"` : ''}>${esc(s.s)}</h1>`;
-      let h = `<button class="slv-back">← ${tab ? 'к статье' : opts.backLbl || (q.value.trim() ? 'к списку' : 'к поиску')}</button>
-        <div class="slv-head">${h1}<button class="slv-say" aria-label="Произнести">${SPK}</button></div>`;
+      /* переключатель залога Е/П (27.11.2026) — у глагола с двумя залогами, когда таблицы в памяти; буква — нынешний залог:
+         в статье — первый в таблицах, на экране таблиц — показанный; нажатие — таблицы другого залога */
+      const tz = s.tb && glagol(s) && D.ptr.tablicyN ? tbSync(l) : null, vs = zalogi(tz);
+      const side = !tab && bok() && s.tb && D.ptr.tablicyN;  /* от 1360 px — таблицы рядом со статьёй, Е/П меняет их на месте */
+      if (zal.l !== l || (!tab && !side)) { zal.l = l; zal.v = null; }  /* статья — залог по умолчанию; касание слова — его таблицы */
+      const v = (tab || side) && vs.includes(zal.v) ? zal.v : vs[0];
+      let h = `<button class="slv-back${tab ? '' : ' slv-bl'}">← ${tab ? 'к статье' : opts.backLbl || (q.value.trim() ? 'к списку' : 'к поиску')}</button>
+        <div class="slv-head">${h1}${zalBtn(vs, v)}<button class="slv-say" aria-label="Произнести">${SPK}</button></div>`;
       if (tab) {  /* таблицы — отдельным экраном той же статьи */
         mode = 'tab';
         const t = D.ptr.tablicyN ? tbSync(l) : null;
-        art.innerHTML = h + (t === undefined ? '<p class="slv-tbwait">Загружаю таблицы…</p>' : t ? tbHtml(t) : '<p class="slv-tbwait">Таблицы для этого слова нет.</p>');
+        art.innerHTML = h + (t === undefined ? '<p class="slv-tbwait">Загружаю таблицы…</p>' : t ? tbHtml(t, v || null, setka()) : '<p class="slv-tbwait">Таблицы для этого слова нет.</p>');
         fitHead(art.querySelector('.slv-head'), art);
         if (t === undefined) tablicy(l).then(() => cur === l && mode === 'tab' && article(l, m, s)).catch(e => { const w = art.querySelector('.slv-tbwait'); if (w) w.textContent = navigator.onLine ? e.message : 'Таблицы ещё не загружались на этот телефон — откройте один раз со связью.'; });
         return;
@@ -933,17 +1084,23 @@
       if (s.c && s.c.length && !s.tb) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
       const e0 = etimSync(l);  /* «Происхождение ›» с выжимкой; файл ещё открывается — строка встанет, когда откроется */
       h += `<div class="slv-ety">${e0 ? etimRow(l, e0) : ''}</div>`;
-      art.innerHTML = h;
+      if (side) {  /* статья слева, таблицы справа; таблицы ещё не в памяти — встанут, когда откроются */
+        const ts = tbSync(l), bokH = t => t ? `<h2>${tbName(s)}</h2>` + tbHtml(t, (vs.includes(zal.v) ? zal.v : zalogi(t)[0]) || null, true) : '';
+        art.classList.add('slv-2');
+        art.innerHTML = `<div class="slv-osn">${h}</div><aside class="slv-bok">${ts === undefined ? '<p class="slv-tbwait">Загружаю таблицы…</p>' : bokH(ts)}</aside>`;
+        if (ts === undefined) tablicy(l).then(t => { const b = cur === l && mode === null && art.querySelector('.slv-bok'); if (b) b.innerHTML = bokH(t); }).catch(() => {});
+      } else art.innerHTML = h;
       if (t0 === undefined) tablicy(l).then(t => {
         if (!t || cur !== l || mode !== null) return;
-        const b = art.querySelector('.slv-nota'), z = art.querySelector('.slv-zamb');
+        const b = art.querySelector('.slv-nota'), z = art.querySelector('.slv-zamb'), vs = zalogi(t), hd = art.querySelector('.slv-head');
         if (b) b.innerHTML = notaHtml(s, t, nr); if (z) z.innerHTML = zametkiHtml(s, t, nr);
+        if (vs.length && hd && !hd.querySelector('.slv-zal')) { hd.querySelector('.slv-say').insertAdjacentHTML('beforebegin', zalBtn(vs, vs[0])); fitHead(hd, art); }
       }).catch(() => {});
       if (e0 === undefined) etim(l).then(e => { const b = cur === l && mode === null && art.querySelector('.slv-ety'); if (b && e) b.innerHTML = etimRow(l, e); }).catch(() => {});
       fitHead(art.querySelector('.slv-head'), art);  /* до отрисовки: страница ни на миг не шире экрана */
       requestAnimationFrame(() => fitMeta(art.querySelector('.slv-meta')));
       const rec = (readJ(RECENT2) || []).filter(x => x.l !== l); rec.unshift({ l, s: s.s, b: brief(s.z.map(z => z.ru)) });
-      try { localStorage.setItem(RECENT2, JSON.stringify(rec.slice(0, 30))); } catch (e) {}
+      try { localStorage.setItem(RECENT2, JSON.stringify(rec.slice(0, HIST_MAX))); } catch (e) {}
     }
 
     /* история просмотров статей о происхождении (etimIstoriya): последние сверху, слово и значения, выжимка, сколько раз; поиск сверху.
@@ -956,7 +1113,7 @@
       art.innerHTML = `<button class="slv-back">← назад</button><h2 class="slv-hh">История просмотров</h2>
         <input class="slv-q slv-hq" type="search" placeholder="Поиск в истории" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Поиск в истории" data-lpignore="true" data-form-type="other">
         <div class="slv-list slv-hl"></div>`;
-      art.classList.remove('hidden'); list.classList.add('hidden'); st.classList.add('hidden');
+      art.classList.remove('hidden', 'slv-2'); if (!dva()) { list.classList.add('hidden'); st.classList.add('hidden'); } markCur();
       const hq = art.querySelector('.slv-hq'), box = art.querySelector('.slv-hl'), items = etimIstoriya();
       const draw = () => {
         if (!hist) return;
@@ -973,6 +1130,11 @@
       window.scrollTo(0, 0);
     }
 
+    const perestroit = () => {  /* окно сузили или расширили через порог: панели и таблицы — заново, статья та же */
+      const sp = (!!cur || hist) && !dva(); list.classList.toggle('hidden', sp); st.classList.toggle('hidden', sp);
+      if (cur && curS) { article(cur, mode || undefined, curS); refit(); }
+    };
+    MQ.addEventListener('change', perestroit); MQ2.addEventListener('change', perestroit);
     const api = {
       show(l, m) {
         if (m === 'hist') return istoriya();
@@ -991,7 +1153,8 @@
           cur = s ? l : null; if (!s) curS = null;
           if (cur && !was && !wasH) listY = y;  /* уходим со списка в статью — запомнить прокрутку */
           if (cur && was && was !== cur) artY.set(was, y);  /* из статьи в статью (слово примера) */
-          art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', !!cur); st.classList.toggle('hidden', !!cur);
+          const sp = !!cur && !dva();  /* на широком список остаётся */
+          art.classList.toggle('hidden', !cur); list.classList.toggle('hidden', sp); st.classList.toggle('hidden', sp); markCur();
           if (!cur) { drawList(); art.classList.remove('ety-on'); }
           if (cur) {
             refit();
@@ -1008,7 +1171,7 @@
         if (i === undefined) put(null);
         else stat(i).then(put, e => { console.warn('slovar: статья', e); put(null); });
       },
-      focus() { if (!cur && !hist) q.focus({ preventScroll: true }); },
+      focus() { if (!cur && !hist && document.visibilityState === 'visible') q.focus({ preventScroll: true }); },
       ready: null
     };
     drawList();
@@ -1019,7 +1182,10 @@
     return api;
   }
 
-  window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true),
+  /* строка для настроек: «81 201 статья · ищется по-гречески, латиницей и по-русски»; словарь ни разу не открывался — '' */
+  const opisanie = () => { let n = D ? D.ptr.n || D.n : 0; if (!n) try { n = +localStorage.getItem(STATEY) || 0; } catch (e) {}
+    return n ? `${num(n)} ${n % 10 === 1 && n % 100 !== 11 ? 'статья' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'статьи' : 'статей'} · ищется по-гречески, латиницей и по-русски` : ''; };
+  window.Slovar = { mount, load, opisanie, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true),
     etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true), kratko, kratkoHtml,
     /* сказать слово (карточка слова Экмафиси): артикль на выбор — один, как в статье; Azure по запросу (кэш) или голос телефона */
     skazat: (text, btn) => play(sayText(text), null, btn), SPK };

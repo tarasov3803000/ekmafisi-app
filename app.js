@@ -446,6 +446,8 @@ function renderSettings() {
   $('setFraza').classList.toggle('hidden', !isAndr()); $('setObn').classList.toggle('hidden', !isAndr());
   $('setFraza').href = andrUrl('fraza'); $('setObn').href = andrUrl('fraza/obnovlenie');
   document.querySelectorAll('#setGolos button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.g === 'tel') === telGolos())));
+  /* число статей словаря — здесь, не под полем поиска (Ваше слово 27.11.2026) */
+  const so = window.Slovar && Slovar.opisanie ? Slovar.opisanie() : ''; $('setSlv').textContent = so; $('setSlvRow').classList.toggle('hidden', !so);
   document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
   $('setBtN').value = G.btN || 3; $('setBtNV').textContent = G.btN || 3;
   closePops();
@@ -678,6 +680,8 @@ function openSheet(sh) {
   $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
 }
 function closeSheet() { sheetNow = null; $('etym').classList.add('hidden'); document.body.style.overflow = ''; }
+/* от 1000 px окно поверх — панель справа (27.11.2026): нажатие на затемнённую часть слева закрывает его, как «назад» */
+$('etym').addEventListener('click', e => { if (e.target === $('etym') && e.clientX < $('etym').getBoundingClientRect().left) history.back(); });
 $('eHist').onclick = () => { if (!sheetNow || sheetNow.k !== 'hist') { push(curHash(), { k: 'hist' }); openSheet(history.state.sheet); } };
 let etymCur = null;  /* чья статья на виду: пока грузится, могли открыть другую */
 function headHtml(l, D) {
@@ -1337,6 +1341,7 @@ $('cPlay').onclick = () => toggle($('cPlay'), () => playBy($('cPlay'), ck.q[ck.k
 /* --- «Словарь»: весь свой словарь, общий модуль с приложением «Словарь» (app/slovar.js); #slovar — поиск, #slovar/<лемма> — статья --- */
 let SLV = null;
 const slv = () => SLV || (SLV = Slovar.mount($('slvBox'), {
+  dve: true,  /* от 1000 px — две панели: список слева, статья справа (27.11.2026) */
   onPick: (l, m) => { push('slovar/' + encodeURIComponent(l) + (m ? '/' + m : '')); SLV.show(l, m); },
   onBack: () => goBack('slovar')
 }));
