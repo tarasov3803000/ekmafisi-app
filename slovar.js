@@ -404,7 +404,7 @@
     speechSynthesis.speak(u); return true;
   }
   async function zaprosKey(text) {  /* тот же отпечаток считает функция golos (supabase/functions/golos) */
-    const b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(D.golos + '|' + text)));
+    const b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(golosId() + '|' + text)));
     return [...b].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
   }
   async function cached(k, get) {  /* из кэша звука; нет — get() из сети и в кэш */
@@ -421,14 +421,18 @@
   async function azureBlob(text, path) {
     if (path) { const b = await cached(ckey(path), () => EK.remote(path)); if (b) return b; }
     if (!window.EK || !EK.golos || !window.crypto || !crypto.subtle) return null;
-    const k = ckey(`el/zvuk-zapros/${D.golos}/${await zaprosKey(text)}.mp3`);
+    const k = ckey(`el/zvuk-zapros/${golosId()}/${await zaprosKey(text)}.mp3`);
     return cached(k, async () => fetch((await EK.golos(text)).url));
   }
+  const golosId = () => (D && D.golos) || 'athina';  /* словарь ещё не открыт (карточка слова Экмафиси) — голос по умолчанию */
+  /* «Голос: телефона» (настройка Экмафиси, 27.11.2026; ключ на устройстве, вне учётной записи): вместо Azure — голос телефона */
+  const telGolos = () => { try { return localStorage.getItem('ekmafisi-golos') === 'tel'; } catch (e) { return false; } };
   async function play(text, path, btn) {  /* text — что сказать; path — заранее озвученный файл в хранилище или null */
     if (audio) { audio.pause(); audio = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
     btn && btn.classList.add('on');
     const done = () => btn && btn.classList.remove('on');
+    if (telGolos() && phoneVoice(text)) { setTimeout(done, 900); return; }
     try {
       const b = await azureBlob(text, path);
       if (b) {
@@ -1016,5 +1020,7 @@
   }
 
   window.Slovar = { mount, load, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true),
-    etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true), kratko, kratkoHtml };
+    etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true), kratko, kratkoHtml,
+    /* сказать слово (карточка слова Экмафиси): артикль на выбор — один, как в статье; Azure по запросу (кэш) или голос телефона */
+    skazat: (text, btn) => play(sayText(text), null, btn), SPK };
 })();

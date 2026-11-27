@@ -150,6 +150,29 @@
     const { error } = await sb.rpc('admin_user_put', { p_email: email, p_note: note });
     if (error) throw error;
   };
+  /* --- «Фразы на блокировке» (27.11.2026): история с телефона — в таблице fraza_istoriya; родная часть Android пишет её по
+     ключу устройства (fraza_kluch), который ей передаёт ссылка из PWA (andrUrl). Кэш — на устройстве, под id человека.
+     ?dev — пример из набора фраз (build/fraza), чтобы проверить без сервера --- */
+  EK.frazaKluch = async () => {
+    const k = K('fraza.kluch'), v = readJ(k);
+    if (v || DEV || EK.guest || !navigator.onLine) return v || (DEV ? '00000000-0000-4000-8000-000000000000' : null);
+    const { data, error } = await sb.rpc('fraza_kluch');
+    if (error) { console.warn('fraza_kluch', error); return null; }
+    writeJ(k, data); return data;
+  };
+  EK.frazaIstKesh = () => (EK.uid ? readJ(K('fraza.ist')) : null) || [];
+  EK.frazaIst = async () => {
+    if (EK.guest) return [];
+    if (DEV) {
+      const s = await (await fetch('../build/fraza/slovar-el.json')).json(), t0 = Date.parse('2026-11-20T08:00:00Z');
+      return s.slice(200, 260).map((x, i) => ({ id: 'dev' + i, lang: 'el', f: x.f, ru: x.ru, podpis: x.l, ist: 'slovar', zv: x.z,
+        pokazov: 1 + i % 3, zvukov: i % 4 === 0 ? 2 : 0, zvezda: i % 9 === 0, pervyj: new Date(t0 + i * 36e5).toISOString(), poslednij: new Date(t0 + i * 36e5).toISOString() }));
+    }
+    if (!navigator.onLine) return EK.frazaIstKesh();
+    const { data, error } = await sb.from('fraza_istoriya').select('id,lang,f,ru,podpis,ist,zv,pokazov,zvukov,zvezda,pervyj,poslednij').order('pervyj').limit(5000);
+    if (error) { console.warn('fraza_istoriya', error); return EK.frazaIstKesh(); }
+    writeJ(K('fraza.ist'), data); return data;
+  };
   async function checkAdmin() {
     const k = K('admin');
     EK.admin = DEV || readJ(k) === true;

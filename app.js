@@ -15,6 +15,11 @@ const AUTHOR = m => m.source.author_ru || m.source.author;
 /* полка: сначала по языку (греческий, английский), внутри — по уровню; одинаковые — в порядке сборки */
 const LORD = Object.keys(LANGS);
 LIB.sort((a, b) => (LORD.indexOf(a.lang) - LORD.indexOf(b.lang)) || (LEVELS[a.level] || 9) - (LEVELS[b.level] || 9));
+/* фразы с экрана блокировки в тренировке (Ваше слово 27.11.2026) — свой «блок» на каждый язык, не на полке (раздел «Фразы с блокировки») */
+const BLOK = Object.keys(LANGS).map(lang => ({ id: 'blok-' + lang, lang, blok: true, cut: 1, level: '', title: 'Фраза с блокировки', title_t: 'Фраза с блокировки',
+  source: { author: '', channel: '' }, audio: { layer: 'blok' }, phrases: [], lexicon: {}, chunks: [[]], idioms: [] }));
+const blokOf = lang => BLOK.find(b => b.lang === (lang || 'el'));
+const findMat = id => LIB.find(m => m.id === id) || BLOK.find(m => m.id === id);
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
 
@@ -132,6 +137,7 @@ const blobs = {};
 let audioReady = Promise.resolve();
 function loadAudio(m) {
   const show = on => $('loading').classList.toggle('hidden', !on);
+  if (m.blok) { show(false); return (audioReady = Promise.resolve()); }  /* у фраз с блокировки звук свой у каждой — blokSrc */
   if (blobs[m.id]) { audio.src = blobs[m.id]; show(false); return (audioReady = Promise.resolve()); }
   show(true); $('loading').textContent = 'Загружаю звук…';
   return (audioReady = EK.content(m.audio.file).then(r => r.blob())
@@ -161,15 +167,22 @@ function tick() {
 }
 /* запасная остановка: rAF спит в фоне и на погасшем экране, timeupdate — нет; опоздание ≤ 0,25 с уходит в тишину после фразы */
 audio.addEventListener('timeupdate', () => { if (stopAt !== null && audio.currentTime >= stopAt) { cancelAnimationFrame(raf); tick(); } });
+audio.addEventListener('ended', () => { if (stopAt !== null && !tts) { stopAt = 0; cancelAnimationFrame(raf); tick(); } });  /* фраза — целый файл (пример словаря) */
 function stop() {
+  if (tts || ttsHeld) { tts = ttsHeld = null; speechSynthesis.cancel(); }
   seqToken++; cancelAnimationFrame(raf); audio.pause(); stopAt = null; onEnd = null;
   owner = null; paused = false; seqActive = false; heldNext = null; paintOwner();
   document.querySelectorAll('.playing').forEach(e => e.classList.remove('playing'));
 }
-function pause() { paused = true; cancelAnimationFrame(raf); audio.pause(); paintOwner(); }
+function pause() {
+  paused = true; cancelAnimationFrame(raf); audio.pause();
+  if (tts) { ttsHeld = tts; tts = null; speechSynthesis.cancel(); }  /* голос телефона на паузе ненадёжен — продолжаем фразу заново */
+  paintOwner();
+}
 function resume() {
   paused = false;
   if (heldNext) { const f = heldNext; heldNext = null; f(); }
+  else if (ttsHeld) { const t = ttsHeld; ttsHeld = null; ttsSay(t.i, t.rate, t.done); }
   else if (stopAt !== null) { const pr = audio.play(); if (pr && pr.catch) pr.catch(() => {}); raf = requestAnimationFrame(tick); }
   paintOwner();
 }
@@ -188,8 +201,30 @@ function audioOpen() {
     const t = setTimeout(f, 1500); audio.addEventListener('loadedmetadata', f);
   }));
 }
+/* «Голос: телефона» (настройка, 27.11.2026) — тексты своей озвучки (audio.layer 'golos': «Кино», пересказы) читаются голосом
+   телефона; записи блогеров — записью. stopAt = Infinity — «звучит» для всей машины ▶/⏸, конец — по концу реплики */
+let tts = null, ttsHeld = null;
+const ttsOn = (m, i) => telGolos() && (m.blok ? !!(m.phrases[i] && m.phrases[i].golos) : m.audio && m.audio.layer === 'golos') && !!voiceOf(m.lang || 'el');
+function ttsSay(i, rate, done) {
+  const tok = seqToken, v = voiceOf(M.lang || 'el'), text = TX(P[i]), u = new SpeechSynthesisUtterance(text);
+  u.voice = v; u.lang = v.lang; u.rate = rate;
+  const me = tts = { i, rate, done, u };
+  stopAt = Infinity; onEnd = done || null;
+  let t = 0;
+  const fin = () => {
+    clearTimeout(t); if (tts !== me || tok !== seqToken) return;
+    tts = null; stopAt = null; const f = onEnd; onEnd = null; f && f();
+    if (!seqActive && stopAt === null) owner = null;
+    paintOwner();
+  };
+  u.onend = u.onerror = fin;
+  t = setTimeout(fin, (1500 + text.length * 90 / rate) * 2);  /* onend в Chrome на Android бывает не приходит */
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+}
 function playOne(i, rate, done, waited) {
   cancelAnimationFrame(raf); audio.pause(); paused = false;
+  if (ttsOn(M, i)) { ttsHeld = null; return ttsSay(i, rate, done); }
+  if (M.blok) return blokPlay(i, rate, done);
   if (!blobs[M.id] || (audio.readyState < 1 && !waited)) {
     const tok = seqToken, m = M;
     audioOpen().then(() => {
@@ -224,6 +259,11 @@ function playSeq(el, idx, rate, markFn) {
 /* --- общее --- */
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/* голос телефона для языка (el, en, ru) */
+const voiceOf = lang => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => new RegExp('^' + lang + '(-|_|$)', 'i').test(v.lang));
+/* «Голос»: Azure или телефона (Ваша просьба 27.11.2026) — на этом устройстве, вне учётной записи (тот же ключ читает slovar.js) */
+const GOLOS = 'ekmafisi-golos';
+const telGolos = () => { try { return localStorage.getItem(GOLOS) === 'tel'; } catch (e) { return false; } };
 const plural = (n, a, b, c) => (n % 10 === 1 && n % 100 !== 11) ? a : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? b : c;
 const RATE_LBL = r => r === 1 ? 'оригинал' : String(r).replace('.', ',') + '×';
 function counts(m, colors) {
@@ -237,8 +277,9 @@ const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] 
 
 function show(id) {
   stop();
+  if (id !== 'skor' && sk.back) { const b = sk.back; sk.back = null; if (M && M.blok) setText(b.id, true); }
   if (id !== 'nasluh') { nsStop(); NS.wasOn = false; nsDict(null); nsPopClose(); }
-  ['shelf', 'settings', 'about', 'nasluh', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  ['shelf', 'settings', 'about', 'nasluh', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo', 'fraza'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
   /* на полке вместо домика — флаг изучаемого языка (нажатие — другой язык) */
   $('goHome').classList.toggle('hidden', id === 'shelf'); $('langFlag').classList.toggle('hidden', id !== 'shelf');
@@ -249,6 +290,7 @@ function show(id) {
   if (id === 'home') renderHome();
   if (id === 'settings') renderSettings();
   if (id === 'words') renderWords();
+  if (id === 'fraza') renderFraza();
   if (id === 'nasluh') nsOpen();
   $('acctPop').classList.add('hidden');
 }
@@ -266,7 +308,7 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
   else { history.replaceState({ d: 0, sheet: null }, '', urlOf(fallback)); applyLoc(); }
 }
 function parseHash(h) {
-  if (['settings', 'about', 'nasluh', 'check', 'words', 'soberi', 'sbgo'].includes(h)) return { v: h };
+  if (['settings', 'about', 'nasluh', 'check', 'words', 'soberi', 'sbgo', 'fraza'].includes(h)) return { v: h };
   if (h === 'slovar' || h.startsWith('slovar/')) {  /* #slovar/<лемма>[/tab|/etym] — статья, её таблицы или происхождение */
     const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.match(/\/(tab|etym|hist)$/);
     return { v: 'slovar', l: m ? r.slice(0, -m[0].length) : r, m: m ? m[1] : null };
@@ -276,13 +318,13 @@ function parseHash(h) {
 }
 function applyLoc(force) {  /* force — первый вход: экран рисуется, даже если уже виден */
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
-  if (['shelf', 'settings', 'about', 'nasluh', 'words'].includes(t.v)) { if (force || !shown(t.v)) show(t.v); }
+  if (['shelf', 'settings', 'about', 'nasluh', 'words', 'fraza'].includes(t.v)) { if (force || !shown(t.v)) show(t.v); }
   else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
   else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slv().show(t.l, t.m); }
   else if (t.v === 'soberi') { if (force || !shown('soberi')) soberiOpen(); }
   else if (t.v === 'sbgo') { if (force || !shown('sbgo')) sbGo(SB.step); }
   else {
-    const fresh = !M || M.id !== t.id;
+    const fresh = (!M || M.id !== t.id) && !(t.v === 'skor' && sk.back && sk.back.id === t.id && shown('skor'));  /* открыта фраза с блокировки внутри «Повторения» */
     if (fresh) setText(t.id);
     if (force || fresh || !shown(t.v)) t.v === 'home' ? show('home') : t.v === 'bt' ? btOpenAt(btPos()) : t.v === 'ves' ? vesOpen() : skorOpen(S.skorAt);
   }
@@ -297,10 +339,10 @@ function renderShelf() {
   /* язык не выбран — сначала выбор; выбран — на полке только его тексты */
   $('langPick').classList.toggle('hidden', !!G.lang);
   $('shelfList').classList.toggle('hidden', !G.lang);
-  const textHtml = m => {
+  const textHtml = (m, top) => {  /* top — карточка сверху полки: самого обычного вида, без рамки «последний» (Ваше слово 27.11.2026) */
     const pr = progOf(m), c = counts(m, pr.colors), n = m.phrases.length;
     const done = c.g + c.y + c.r;
-    return `<button class="text${lastId() === m.id ? ' last' : ''}" data-id="${m.id}">
+    return `<button class="text${!top && lastId() === m.id ? ' last' : ''}" data-id="${m.id}">
       <span class="top"><span class="row" style="gap:6px"><span class="chip lang" title="${esc(LG(m).name)}">${esc(LG(m).chip)}</span><span class="chip">${esc(m.level)}</span></span><span class="meta2">${n} ${plural(n, 'фраза', 'фразы', 'фраз')}</span></span>
       <span class="t">${esc(TTL(m))}</span>
       <span class="tru">${esc(m.title)}</span>
@@ -316,7 +358,7 @@ function renderShelf() {
   /* сверху — текст, с которым работали последним (Ваше слово 26.11.2026: вместо «Продолжить»); нажатие — сам текст */
   const last = G.lang && LIB.find(m => m.id === lastId() && (m.lang || 'el') === G.lang);
   $('lastText').classList.toggle('hidden', !last);
-  $('lastText').innerHTML = last ? textHtml(last) : '';
+  $('lastText').innerHTML = last ? textHtml(last, true) : '';
   document.querySelectorAll('#texts .text, #lastText .text').forEach(b => b.onclick = () => openText(b.dataset.id));
   /* плитки — одним шрифтом, только название (26.11.2026); «Проверка · N» — фразы, которым подошёл срок */
   $('shelfTools').classList.toggle('hidden', !G.lang);
@@ -325,10 +367,10 @@ function renderShelf() {
     $('chkOpen').textContent = `Проверка · ${n}`;
     $('chkOpen').disabled = !n;
   }
-  /* «Фразы на блокировке» — история показанных на экране блокировки; сама история — на телефоне, в Android-приложении */
-  let andr = false; try { andr = localStorage.getItem('ekmafisi.android') === '1'; } catch (e) {}
-  $('frazaOpen').classList.toggle('hidden', !andr);
-  $('frazaOpen').href = `intent://fraza/istoriya?tema=${themeNow()}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
+  /* «Фразы на блокировке» — история показанных на экране блокировки (27.11.2026 — и на компьютере): в Android-приложении —
+     родной экран (★, 🔊), иначе — экран «Фразы · N» из истории на сервере */
+  $('frazaOpen').classList.toggle('hidden', !G.lang || EK.guest);
+  $('frazaOpen').href = isAndr() ? andrUrl('fraza/istoriya') : '#fraza';
   $('langFlag').textContent = { el: '🇬🇷', en: '🇬🇧' }[G.lang] || '🌐';
   $('langFlag').setAttribute('aria-label', 'Язык: ' + (G.lang ? LANGS[G.lang].name : 'не выбран') + '. Сменить');
   /* «Собрать фразу» (режим «Собери») и «Словарь» — только у греческого; плитка — без ступени (26.11.2026) */
@@ -391,12 +433,19 @@ $('usAdd').onsubmit = async ev => {
   } catch (e) { $('usMsg').textContent = 'Не вышло: ' + (e.message || e); }
 };
 
+/* Android-приложение Экмафиси (TWA + родная часть): ссылки в его родные экраны; тема и голос — как здесь, родная часть их запоминает
+   (тема — для ярлыка и уведомления, голос — для 🔊 фразы на блокировке) */
+const isAndr = () => { try { return localStorage.getItem('ekmafisi.android') === '1'; } catch (e) { return false; } };
+/* k — ключ устройства: по нему родная часть отправляет историю фраз на сервер (fraza_istoriya_put) */
+let FK = null;
+const andrUrl = path => `intent://${path}?tema=${themeNow()}&golos=${telGolos() ? 'tel' : 'azure'}${FK ? '&k=' + FK : ''}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
+$('frazaOpen').onclick = e => { if (isAndr()) return; e.preventDefault(); if (!shown('fraza')) { push('fraza'); show('fraza'); } };
 function renderSettings() {
   $('setUsers').classList.toggle('hidden', !EK.admin);
-  /* «Фраза на экране блокировки» — только в Android-приложении Экмафиси: сама функция и её настройки — там (android/) */
-  try { $('setFraza').classList.toggle('hidden', localStorage.getItem('ekmafisi.android') !== '1'); } catch (e) {}
-  /* тема экрана фразы — как здесь: родной экран запоминает её и для ярлыка и уведомления */
-  $('setFraza').href = `intent://fraza?tema=${themeNow()}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
+  /* «Фраза на экране блокировки» и «Обновление программы» (родная часть: фраза, значок) — только в Android-приложении */
+  $('setFraza').classList.toggle('hidden', !isAndr()); $('setObn').classList.toggle('hidden', !isAndr());
+  $('setFraza').href = andrUrl('fraza'); $('setObn').href = andrUrl('fraza/obnovlenie');
+  document.querySelectorAll('#setGolos button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.g === 'tel') === telGolos())));
   document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
   $('setBtN').value = G.btN || 3; $('setBtNV').textContent = G.btN || 3;
   closePops();
@@ -416,6 +465,13 @@ function renderSettings() {
 $('setBtN').oninput = () => { G.btN = +$('setBtN').value; $('setBtNV').textContent = G.btN; };
 $('setBtN').onchange = () => { G.btN = +$('setBtN').value; saveG(); };
 document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
+/* «Голос»: Azure (своя озвучка) или голос телефона — для всего синтезированного: словарь, «На слух» (и русский), тексты своей
+   озвучки («Кино», пересказы); записи блогеров звучат записью. На этом устройстве: голоса у телефона и компьютера разные */
+document.querySelectorAll('#setGolos button').forEach(b => b.onclick = () => {
+  try { localStorage.setItem(GOLOS, b.dataset.g); } catch (e) {}
+  if (b.dataset.g === 'tel' && !voiceOf((G.lang || 'el'))) alert('На этом устройстве нет голоса для этого языка — останется Azure. Голос ставится в настройках телефона: «Синтез речи» → Google → языки.');
+  renderSettings();
+});
 /* крупный шрифт: +1…+5 px ко всем текстам, как в читалке (+4 и +5 — для планшета); только на этом устройстве (экраны телефона и Мака разные),
    ключ вне учётной записи — читается до входа (index.html). Ползунок — кегль меняется сразу, пока тянете */
 const UP = 'ekmafisi-up';
@@ -442,7 +498,7 @@ $('acctOpen').onclick = e => { e.stopPropagation(); const h = !$('acctPop').clas
 document.addEventListener('click', e => { if (!e.target.closest('.acct')) { $('acctPop').classList.add('hidden'); $('acctOpen').setAttribute('aria-expanded', 'false'); } });
 
 function setText(id, quiet) {  /* quiet — для «Проверки»: текст нужен, последний текст полки не трогаем */
-  const m = LIB.find(x => x.id === id);
+  const m = findMat(id);
   if (M !== m) { M = m; P = m.phrases; CHUNKS = m.chunks; S = progOf(m); }
   if (!quiet) { G['last.' + (m.lang || 'el')] = m.id; saveG(); }
   loadAudio(m); loadLex(m);
@@ -532,26 +588,31 @@ const formsOf = (L, D) => L.forms ? LG(M).forms.map(k => (L.forms[k] || '—').r
 /* выражение (idioms материала), куда входит слово k фразы p: at — [фраза, с, по] включительно, номера в p.words от 0 */
 const idiomOf = (p, k) => (M.idioms || []).find(d => (d.at || []).some(([pid, a, b]) => pid === p.id && k >= a && k <= b)) || null;
 const idiomRange = (p, d) => d.at.find(([pid]) => pid === p.id).slice(1);
+/* артикль существительного — по помете части речи («сущ. ср.» → το; «сущ. м./ж.» → ο/η) */
+const ARTS = { 'м.': 'ο', 'ж.': 'η', 'ср.': 'το' };
+const artOf = pos => { const m = /^сущ\.\s*(.+)$/.exec(pos || ''); return m ? m[1].split('/').map(g => ARTS[g.trim()]).filter(Boolean).join('/') : ''; };
 function glossHtml(w, p, k) {
-  const L = M.lexicon[w.l] || {}, D = LEX[w.l], d = p && idiomOf(p, k);
+  const L = M.lexicon[w.l] || {}, D = LEX[w.l], d = p && idiomOf(p, k), isEl = (M.lang || 'el') === 'el';
   /* нажатое слово внутри выражения — выражение целиком над статьёй слова */
   let h = d ? `<div class="idm"><div><span class="el">${esc(d.t)}</span> — ${esc(d.ru)}</div>${d.note ? `<div class="small muted">${esc(cap(d.note))}</div>` : ''}</div>` : '';
+  /* первая строка (Ваше слово 27.11.2026): слово — существительное с артиклем — синим; нажатие — статья словаря, как
+     «Происхождение ›» — статья о происхождении; справа — свой 🔊. У английского словаря нет — слово ведёт к «Значениям» */
+  const head = isEl ? [artOf(L.pos), w.l].filter(Boolean).join(' ') : w.l;
+  const to = isEl ? `data-slv="${esc(w.l)}"` : D && D.dict.senses.length ? `data-senses="${esc(w.l)}"` : '';
+  h += `<div class="gl-head"><${to ? 'button' : 'span'} class="gl-w el" lang="${isEl ? 'el' : 'en'}" ${to}>${esc(head)}</${to ? 'button' : 'span'}>`
+    + `<button class="gl-say" data-say="${esc(head)}" aria-label="Произнести">${Slovar.SPK}</button></div>`;
   h += `<div>${esc(cap(L.ru || (D && D.dict.senses[0] && D.dict.senses[0].ru) || ''))}</div>`;
   const g = noteOf(w, L);
   if (g) h += `<div class="small muted">${esc(cap(g))}</div>`;
   /* формы строкой, без названий времён: el — настоящее · παρατατικός · аорист · будущее; en — base · past · participle, только у неправильных */
   /* греческое имя (у глагола форм L.forms нет — тоже): краткая таблица — три падежа без звательного или четыре формы
      (Ваш ответ 26.11.2026, Slovar.kratko); таблицы нет — формы строкой, как было */
-  const f = formsOf(L, D), isEl = (M.lang || 'el') === 'el', note = L.note ? `<div class="small muted">${esc(cap(L.note))}</div>` : '';
+  const f = formsOf(L, D), note = L.note ? `<div class="small muted">${esc(cap(L.note))}</div>` : '';
   if (f && (L.forms || !isEl)) h += `<div class="el">${esc(f)}</div>` + note;
   else {
-    if (base(w.t) !== base(w.l)) h += `<div class="el">${esc(w.l)}</div>`;
     if (isEl) h += `<div class="kr" data-kr="${esc(w.l)}"${f ? ` data-alt="${esc(f)}"` : ''}></div>`;
     if (f) h += note;
   }
-  const a = [];
-  if (D && D.dict.senses.length) a.push(`<button class="link" data-senses="${esc(w.l)}">Значения</button>`);
-  if (a.length) h += `<div class="gl-links">${a.join('<span class="muted">·</span>')}</div>`;
   /* «Происхождение ›» с выжимкой — второй путь к статье, для тех, кто про долгое нажатие не знает (решение 5.11.2026) */
   if (!M || M.lang === 'el') h += Slovar.etimRow(w.l, Slovar.etimSync(w.l));
   return h;
@@ -600,9 +661,20 @@ function openEtym(l, src) {  /* src — откуда открыто: слово 
   if (box) return showInline(box, src, b => renderEtym(l, b));
   push(curHash(), { k: 'etym', l }); openSheet(history.state.sheet);
 }
+/* статья словаря из карточки слова (Ваше слово 27.11.2026) — окном поверх, на любом экране: тот же «Словарь», без поиска и списка;
+   слово примера и «Происхождение ›» внутри — шаги истории, «назад» — на шаг выше */
+let SLVE = null;
+const slvE = () => SLVE || (SLVE = Slovar.mount($('eSlv'), {
+  backLbl: 'назад',
+  onPick: (l, m) => { push(curHash(), { k: 'slv', l, m: m || null }); openSheet(history.state.sheet); },
+  onBack: () => history.back()
+}));
 function openSheet(sh) {
   sheetNow = sh; $('etym').scrollTop = 0;
-  sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : sh.k === 'word' ? renderWord(sh.l) : renderEtym(sh.l);
+  const slv = sh.k === 'slv';
+  $('eBody').classList.toggle('hidden', slv); $('eSlv').classList.toggle('hidden', !slv); $('eHist').classList.toggle('hidden', slv);
+  if (slv) { $('eTtl').textContent = 'Словарь'; slvE().show(sh.l, sh.m); }
+  else sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : sh.k === 'word' ? renderWord(sh.l) : renderEtym(sh.l);
   $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
 }
 function closeSheet() { sheetNow = null; $('etym').classList.add('hidden'); document.body.style.overflow = ''; }
@@ -661,6 +733,15 @@ function renderHist() {
 }
 /* нажатия внутри карточки и окон — одним слушателем: «Значения» и data-etym открывают своё окно */
 document.addEventListener('click', e => {
+  const v = e.target.closest('[data-slv]');
+  if (v && !v.closest('.slv')) { e.stopPropagation(); push(curHash(), { k: 'slv', l: v.dataset.slv, m: null }); openSheet(history.state.sheet); return; }
+  const z = e.target.closest('[data-say]');
+  if (z) {
+    e.stopPropagation();
+    if ((M && M.lang || 'el') === 'el') Slovar.skazat(z.dataset.say, z);
+    else { const vc = voiceOf(M.lang); if (vc) { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(z.dataset.say); u.voice = vc; u.lang = vc.lang; speechSynthesis.speak(u); } }
+    return;
+  }
   const s = e.target.closest('[data-senses]');
   if (s) { const box = inlineBox(s); if (box) showInline(box, null, b => renderSenses(s.dataset.senses, b)); else { push(curHash(), { k: 'senses', l: s.dataset.senses }); openSheet(history.state.sheet); } return; }
   const a = e.target.closest('[data-etym], [data-ety]');
@@ -732,7 +813,7 @@ function skorOpen(i) {
 }
 function skorRender() {
   const p = P[sk.i];
-  $('sCnt').textContent = `${sk.i + 1} / ${P.length}`;
+  $('sCnt').textContent = M.blok ? (p.star ? '★ ' : '') + 'с блокировки' : `${sk.i + 1} / ${P.length}`;
   $('sText').innerHTML = wordsHtml(p);
   $('sText').classList.toggle('vh', sk.hide);
   paintEye($('sEye'), sk.hide, 'текст');
@@ -762,6 +843,7 @@ function onSwipe(el, fn) {
 }
 const slideIn = (el, d) => { el.classList.remove('sw-n', 'sw-p'); void el.offsetWidth; el.classList.add(d > 0 ? 'sw-n' : 'sw-p'); };
 onSwipe($('skor'), d => {
+  if (sk.back) { stop(); return blokBack(); }  /* со фразы с блокировки свайп — назад к блоку */
   stop(); sk.i = nextIdx(sk.i, d); S.skorAt = sk.i; save();
   skorRender(); slideIn(document.querySelector('#skor .pcard'), d);
 });
@@ -774,8 +856,11 @@ onSwipe($('bt'), d => {
 $('sEye').onclick = () => { sk.hide = !sk.hide; $('sText').classList.toggle('vh', sk.hide); paintEye($('sEye'), sk.hide, 'текст'); if (sk.hide) $('sGloss').classList.add('hidden'); };
 $('sDone').onclick = () => {
   stop(); passed(sk.i);
+  if (sk.back) return blokBack();  /* фраза с блокировки пройдена — назад к блоку, к следующей его фразе */
   S.skorAt = nextIdx(sk.i, 1); save();
-  sk.i = S.skorAt; skorRender(); window.scrollTo(0, 0);
+  sk.i = S.skorAt;
+  if (blokTurn()) return;
+  skorRender(); window.scrollTo(0, 0);
 };
 
 /* --- Обратный перевод: один экран — шаг 1 (читать и слушать), шаг 2 (поле на каждую фразу), шаг 3 — сверка ---
@@ -1062,21 +1147,155 @@ function cardsOf(s) {
 }
 const stateOf = m => (M === m ? S : progOf(m));
 const langTexts = () => LIB.filter(m => m.lang === G.lang);
+/* тексты и фразы с блокировки языка — для счётчика слов: освоенная фраза с блокировки отдаёт слова так же, как фраза текста */
+const langAll = () => [...langTexts(), ...BLOK.filter(b => b.lang === G.lang)];
 /* фразы, которым подошёл срок: сначала давние */
 function dueList() {
   const today = dayOf(Date.now()).getTime(), out = [];
   langTexts().forEach(m => { const C = cardsOf(stateOf(m)); m.phrases.forEach((p, i) => { const c = C[p.id]; if (c && c.due && c.due <= today) out.push({ id: m.id, i, due: c.due }); }); });
-  return out.sort((a, b) => a.due - b.due);
+  out.sort((a, b) => a.due - b.due);
+  /* фразы с блокировки — 10 % очереди (Ваше слово 27.11.2026), вперемежку: сначала подошедшие по сроку, потом новые
+     по порядку тренировки (★, потом 🔊, потом вразброс) */
+  const b = blokOf(G.lang), k = Math.ceil(out.length * BLOK_DOLYA);
+  if (!b || !k) return out;
+  const add = blokOchered(b).slice(0, k).map(i => ({ id: b.id, i, due: 0 }));
+  const step = out.length / add.length;
+  add.forEach((x, j) => out.splice(Math.round(step * (j + 1)) + j, 0, x));
+  return out;
 }
 /* освоенные фразы и слова: слово освоено, если оно есть в освоенной фразе */
 function wordStats() {
   const ok = new Set(), seen = new Set();
-  langTexts().forEach(m => {
+  langAll().forEach(m => {
     const C = cardsOf(stateOf(m));
-    m.phrases.forEach(p => { const good = C[p.id] && C[p.id].s >= MASTER; p.words.forEach(w => { if (!w.l) return; seen.add(w.l); if (good) ok.add(w.l); }); });
+    m.phrases.forEach(p => { const good = C[p.id] && C[p.id].s >= MASTER; (p.lem || p.words.map(w => w.l)).forEach(l => { if (!l) return; seen.add(l); if (good) ok.add(l); }); });
   });
   return { ok: ok.size, okSet: ok, seen };
 }
+
+/* --- Фразы с экрана блокировки в тренировке (Ваше слово 27.11.2026) ---
+   История с телефона (EK.frazaIst, таблица fraza_istoriya) → свой блок на каждый язык (BLOK, id «blok-<язык>», на полке
+   его нет). Порядок тренировки: со звёздочкой (★ в шторке — «хорошая, хочу запомнить»), потом со 🔊, потом прочие
+   вразброс (порядок вразброс — постоянный, по отпечатку фразы). Прогресс, журнал и FSRS — обычные, как у текстов:
+   освоенная фраза (стабильность ≥ 21 дня) отдаёт слова в счётчик освоенных.
+   «Повторение» блока: 10 % от числа его фраз — после каждых n / k пройденных ✓ одна фраза с блокировки (новая или
+   подошедшая по сроку); ✓ на ней — назад к блоку. «Проверка»: 10 % очереди (dueList).
+   Слова: у фраз текстов — разметка текста (леммы и значения); у примеров словаря — форма → лемма по частотному
+   списку (первая тысяча) и слово статьи; прочие слова — формой (статья словаря находит её сама), в счётчик не идут. */
+const BLOK_DOLYA = 0.1;
+let IST = [];
+const fnv = t => { let h = 2166136261; for (const c of t) { h ^= c.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+/* фразы блока, которым пора: подошедшие по сроку, потом новые (без карточки) — в порядке тренировки; «выучено» — мимо */
+function blokOchered(b, check) {
+  const today = dayOf(Date.now()).getTime(), s = stateOf(b), C = cardsOf(s), due = [], nw = [];
+  b.phrases.forEach((p, i) => {
+    if (skipped(s, p.id)) return;
+    const c = C[p.id];
+    if (!c) nw.push(i); else if (c.due && c.due <= today) due.push({ i, due: c.due });
+  });
+  return [...due.sort((x, y) => x.due - y.due).map(x => x.i), ...nw].filter(i => !check || !blokSeen.has(b.phrases[i].id));
+}
+const blokSeen = new Set();  /* показанные в этом заходе — второй раз не подсовывать */
+function blokTurn() {  /* пора ли после этой ✓ фразы блока показать фразу с блокировки; да — показать */
+  if (M.blok) return false;
+  const b = blokOf(M.lang); if (!b || !b.phrases.length) return false;
+  sk.n = (sk.n || 0) + 1;
+  const k = Math.max(1, Math.round(P.length * BLOK_DOLYA)), step = Math.max(1, Math.floor(P.length / k));
+  if (sk.n % step) return false;
+  const i = blokOchered(b).find(j => !blokSeen.has(b.phrases[j].id)); if (i === undefined) return false;
+  blokSeen.add(b.phrases[i].id);
+  sk.back = { id: M.id, i: sk.i }; setText(b.id, true);
+  sk.i = i; skorRender(); window.scrollTo(0, 0); slideIn(document.querySelector('#skor .pcard'), 1);
+  return true;
+}
+function blokBack() {
+  const bk = sk.back; sk.back = null; setText(bk.id, true);
+  sk.i = bk.i; skorRender(); window.scrollTo(0, 0); slideIn(document.querySelector('#skor .pcard'), 1);
+}
+/* звук фразы с блокировки: пример словаря — свой файл (el/zvuk-prim/<голос>/<sha8>.mp4), фраза текста — отрезок файла текста */
+async function blokSrc(p) {
+  const z = p.zv; if (!z) return null;
+  if (z.m) {
+    const m = LIB.find(x => x.id === z.m); if (!m) return null;
+    if (!blobs[m.id]) blobs[m.id] = URL.createObjectURL(await (await EK.content(m.audio.file)).blob());
+    return { url: blobs[m.id], at: z.at, dl: z.dl };
+  }
+  return { url: await nsBlob({ z: z.u }), at: 0, dl: null };
+}
+function blokPlay(i, rate, done) {
+  const tok = seqToken, m = M;
+  blokSrc(P[i]).then(src => {
+    if (tok !== seqToken || M !== m) return;
+    if (!src) { if (voiceOf(m.lang || 'el')) ttsSay(i, rate, done); else stop(); return; }  /* звука нет — голосом телефона */
+    const go = () => {
+      if (tok !== seqToken || M !== m) return;
+      audio.defaultPlaybackRate = audio.playbackRate = rate; audio.preservesPitch = audio.webkitPreservesPitch = true;
+      audio.currentTime = src.at; stopAt = src.dl === null ? Infinity : src.at + src.dl; onEnd = done || null;
+      const pr = audio.play(); if (pr && pr.catch) pr.catch(() => {});
+      raf = requestAnimationFrame(tick); paintOwner();
+    };
+    if (audio.src !== src.url) { audio.src = src.url; audio.addEventListener('loadedmetadata', go, { once: true }); }
+    else audio.readyState >= 1 ? go() : audio.addEventListener('loadedmetadata', go, { once: true });
+  }).catch(e => { console.warn('фраза с блокировки: звук', e); if (tok !== seqToken) return; if (voiceOf(m.lang || 'el')) ttsSay(i, rate, done); else stop(); });
+}
+/* строки истории → фразы блоков */
+const F2L = {};  /* язык → форма (без ударений) → лемма, первая тысяча частотного списка */
+async function blokF2L(lang) {
+  if (F2L[lang]) return F2L[lang];
+  const mp = new Map();
+  try { (await (await EK.content(lang + '/chastoty.json')).json()).lemmas.forEach(x => [x.lemma, ...(x.forms || [])].forEach(f => mp.has(nsNorm(f)) || mp.set(nsNorm(f), x.lemma))); } catch (e) {}
+  return (F2L[lang] = mp);
+}
+async function blokBuild(rows) {
+  const src = new Map();  /* текст фразы → фраза и её текст (на полке) */
+  LIB.forEach(m => m.phrases.forEach(p => src.set((m.lang || 'el') + '|' + TX(p), { m, p })));
+  for (const b of BLOK) {
+    const rs = rows.filter(r => (r.lang || 'el') === b.lang);
+    const ord = r => r.zvezda ? 0 : r.zvukov > 0 ? 1 : 2;
+    rs.sort((x, y) => ord(x) - ord(y) || (ord(x) < 2 ? String(y.poslednij).localeCompare(String(x.poslednij)) : fnv(x.id) - fnv(y.id)));
+    const f2l = rs.length ? await blokF2L(b.lang) : new Map();
+    b.lexicon = {};
+    b.phrases = rs.map(r => {
+      const p = { id: 'b' + r.id, t: r.f, ru: r.ru, at: 0, start: 0, end: 0, star: !!r.zvezda, podp: r.podpis || '' };
+      const o = src.get(b.lang + '|' + r.f);
+      if (o) {  /* фраза текста: разметка и звук — того текста */
+        p.words = o.p.words; p.zv = { m: o.m.id, at: o.p.at, dl: o.p.end - o.p.start }; p.golos = o.m.audio.layer === 'golos';
+        o.p.words.forEach(w => { if (w.l && o.m.lexicon[w.l]) b.lexicon[w.l] = o.m.lexicon[w.l]; });
+      } else {  /* пример словаря: слова — формами, леммы — что знает частотный список, и слово статьи */
+        const head = (r.podpis || '').split(' — ')[0].replace(/^(?:ο|η|το|οι|τα|ο\/η)\s+/, '').trim();
+        p.words = (r.f.match(/[\p{L}’']+/gu) || []).map(t => ({ t, l: f2l.get(nsNorm(t)) || t.toLowerCase() }));
+        p.lem = [...new Set([head, ...p.words.map(w => f2l.get(nsNorm(w.t))).filter(Boolean)].filter(Boolean))];
+        if (head && !b.lexicon[head]) b.lexicon[head] = { ru: (r.podpis || '').split(' — ').slice(1).join(' — ') };
+        p.zv = r.ist !== 'teksty' && r.zv ? { u: `${b.lang}/zvuk-prim/athina/${r.zv}.mp4` } : null; p.golos = true;
+      }
+      return p;
+    });
+    if (M === b) P = b.phrases;
+  }
+}
+async function blokLoad() {
+  IST = EK.frazaIstKesh(); await blokBuild(IST);
+  try { IST = await EK.frazaIst(); await blokBuild(IST); } catch (e) { console.warn('фразы с блокировки', e); }
+  if (shown('shelf')) renderShelf(); if (shown('fraza')) renderFraza(); paintWok();
+}
+
+/* --- экран «Фразы · N» (плитка «Фразы на блокировке» вне Android-приложения; там — родной экран с ★ и 🔊) --- */
+const FRS = 'ekmafisi-fraza-novye';  /* порядок: старые сверху (как на телефоне) или новые — на этом устройстве */
+function renderFraza() {
+  const novye = (() => { try { return localStorage.getItem(FRS) === '1'; } catch (e) { return false; } })();
+  const rows = IST.filter(r => (r.lang || 'el') === (G.lang || 'el')).slice().sort((a, b) => String(a.poslednij).localeCompare(String(b.poslednij)) * (novye ? -1 : 1));
+  const b = blokOf(G.lang), st = b ? stateOf(b) : null, C = st ? cardsOf(st) : {};
+  $('frN').textContent = `Фразы · ${rows.length}`;
+  $('frSort').textContent = (novye ? 'новые сверху' : 'старые сверху') + ' ⇅';
+  const dt = t => t ? new Date(t).toLocaleString('ru-RU', { day: 'numeric', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', '') : '';
+  $('frList').innerHTML = rows.length ? rows.map(r => {
+    const c = C['b' + r.id], sost = !c ? '' : c.s >= MASTER ? ' · освоена' : ' · в тренировке';
+    return `<div class="fr-row"><div class="fr-f el">${r.zvezda ? '<span class="fr-star" aria-label="со звёздочкой">★</span> ' : ''}${esc(r.f)}</div><div>${esc(r.ru)}</div>
+      <div class="small muted">${{ el: '🇬🇷', en: '🇬🇧' }[r.lang] || ''} · ${dt(r.poslednij)}${r.pokazov > 1 ? ` · показана ${r.pokazov} ${plural(r.pokazov, 'раз', 'раза', 'раз')}` : ''}${r.zvukov ? ` · 🔊 ${r.zvukov}` : ''}${sost}</div></div>`;
+  }).join('') : `<p class="muted">Пока пусто. Фразы приходят с телефона: Android-приложение Экмафиси, «Фраза на экране блокировки» — после первого открытия плитки «Фразы на блокировке» на телефоне.</p>`;
+  if (!novye) requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));  /* старые сверху — открыть у свежих */
+}
+$('frSort').onclick = () => { try { localStorage.setItem(FRS, localStorage.getItem(FRS) === '1' ? '0' : '1'); } catch (e) {} renderFraza(); };
 
 /* --- «Проверка · N»: русский → поле → «Сверить»; оценка и кнопки — как в «Обратном переводе» --- */
 let ck = { q: [], k: 0, tries: 0, res: null };
@@ -1442,8 +1661,29 @@ function krFill(el) {
   Slovar.kratko(el.dataset.kr).then(h => {
     if (!h) return alt();
     el.innerHTML = (el.dataset.head ? `<span class="lem" lang="el">${esc(el.dataset.head)}</span>` : '') + h;
+    krFit(el);
   }, alt);
 }
+/* таблица шире своего места (крупный шрифт, прилагательное в три рода) — не вбок, а построчно вниз (Ваше слово 27.11.2026):
+   строка на столбец — «ед. м.  τελευταίος · τελευταίου · τελευταίο»; ширина вернулась — снова таблица */
+function krFit(el) {
+  const v = el.querySelector('.kr-v'); if (v) v.outerHTML = el._kr;
+  const t = el.querySelector('table.kr'); if (!t) return;
+  el._kr = t.outerHTML;
+  if (t.offsetWidth <= el.clientWidth + 1) return;
+  const rows = [...t.rows], cols = [...rows[0].cells].slice(1).map(c => c.textContent), out = [];
+  let grp = '', lines = null;
+  const flush = () => { if (lines) cols.forEach((c, j) => out.push(`<p><b lang="ru">${esc([grp, c].filter(Boolean).join(' '))}</b> ${lines[j].map(esc).join(' · ')}</p>`)); lines = null; };
+  rows.slice(1).forEach(r => {
+    if (r.cells.length - 1 !== cols.length) return;
+    const g = r.cells[0].querySelector('span');
+    if (g || !lines) { flush(); grp = g ? g.textContent : grp; lines = cols.map(() => []); }
+    [...r.cells].slice(1).forEach((c, j) => lines[j].push(c.textContent));
+  });
+  flush();
+  t.outerHTML = `<div class="kr-v" lang="el">${out.join('')}</div>`;
+}
+addEventListener('resize', () => document.querySelectorAll('[data-krd]').forEach(krFit));
 new MutationObserver(() => document.querySelectorAll('[data-kr]:not([data-krd])').forEach(krFill)).observe(document.body, { childList: true, subtree: true });
 
 /* --- «На слух» (Ваше задание 26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → пауза (G.nsPause, 10–120 с) → следующая.
@@ -1512,6 +1752,9 @@ async function nsBlob(x) {  /* звук фразы: файл примера сл
   return url;
 }
 function nsSay(x, tok) {  /* фраза на языке: целый файл примера или отрезок файла текста [at, at + длительность] */
+  /* «Голос: телефона» — своя озвучка (примеры словаря, тексты «Кино» и пересказы) голосом телефона; записи блогеров — записью */
+  const lang = (x.m && x.m.lang) || 'el';
+  if (x.f && telGolos() && (!x.m || x.m.audio.layer === 'golos') && voiceOf(lang)) return nsPhone(x.f, lang, x.rate || nsRate(), tok);
   return nsBlob(x).then(url => new Promise((ok, no) => {
     if (tok !== NS.tok) return no('stop');
     const a = NS.a, rate = x.rate || nsRate();
@@ -1533,6 +1776,7 @@ function nsSay(x, tok) {  /* фраза на языке: целый файл п�
 }
 const ruVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^ru(-|_|$)/i.test(v.lang));
 async function nsRu(text, tok) {
+  if (telGolos()) return nsRuPhone(text, tok);
   const ri = await nsRuIndex(), z = ri && ri.i[text.split(/\s+/).join(' ').trim()];
   if (tok !== NS.tok) throw 'stop';
   if (z) {
@@ -1541,14 +1785,15 @@ async function nsRu(text, tok) {
   }
   return nsRuPhone(text, tok);
 }
-function nsRuPhone(text, tok) {  /* перевод голосом телефона; onend в Chrome на Android бывает не приходит — страховка по длине */
+const nsRuPhone = (text, tok) => nsPhone(text, 'ru', 1, tok);
+function nsPhone(text, lang, rate, tok) {  /* голосом телефона; onend в Chrome на Android бывает не приходит — страховка по длине */
   return new Promise((ok, no) => {
     const fin = () => { clearTimeout(t); tok === NS.tok ? ok() : no('stop'); };
-    const v = ruVoice(), est = 600 + text.length * 75;
+    const v = voiceOf(lang), est = 600 + text.length * 75 / rate;
     let t = setTimeout(fin, v ? est * 2 + 2000 : est);
     if (!v) return;
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang; u.rate = 1;
+    const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang; u.rate = rate;
     u.onend = u.onerror = fin;
     speechSynthesis.speak(u);
   });
@@ -1644,11 +1889,14 @@ const NB = {
   src: { t: 'Фразы', v: () => NS.src === 'slovar' ? 'словарь' : 'тексты',
     o: () => [['slovar', 'из словаря'], ['teksty', 'из обучения']], cur: () => NS.src, off: v => !nsSrcOk(v),
     set: v => { if (v === NS.src) return; G.nsSrc = v; nsSetSrc(v); } },
-  hard: { t: 'Сложность', v: () => G.nsHard ? 'сложные' : 'обычные',
+  hard: { t: 'Только сложные', v: () => 'сложные',
     o: () => [[false, 'обычные'], [true, 'только сложные']], cur: () => !!G.nsHard, set: v => { if (v === !!G.nsHard) return; G.nsHard = v; nsSetSrc(NS.src); } },
   pause: { t: 'Пауза после повтора', v: () => nsPause() + ' с' }
 };
-function nsBar() { document.querySelectorAll('.nsbar .nb').forEach(b => { b.querySelector('b').textContent = NB[b.dataset.nb].v(); }); }
+function nsBar() {
+  document.querySelectorAll('.nsbar .nb').forEach(b => { b.querySelector('b').textContent = NB[b.dataset.nb].v(); });
+  document.querySelector('.nsbar [data-nb="hard"]').setAttribute('aria-pressed', String(!!G.nsHard));
+}
 function nsPopClose() { $('nsPop').classList.add('hidden'); document.querySelectorAll('.nsbar .nb').forEach(b => b.setAttribute('aria-expanded', 'false')); }
 function nsPopOpen(b) {
   const k = b.dataset.nb, d = NB[k], pop = $('nsPop'), was = b.getAttribute('aria-expanded') === 'true';
@@ -1668,7 +1916,12 @@ function nsPopOpen(b) {
   const r = b.getBoundingClientRect(), w = pop.offsetWidth;
   pop.style.left = Math.max(12, Math.min(innerWidth - w - 12, r.left + r.width / 2 - w / 2)) + 'px';
 }
-document.querySelectorAll('.nsbar .nb').forEach(b => b.onclick = e => { e.stopPropagation(); nsPopOpen(b); });
+/* «сложные» — просто переключатель, без окошка (Ваше слово 27.11.2026): нажал — гора синяя, только сложные; ещё раз — все */
+document.querySelectorAll('.nsbar .nb').forEach(b => b.onclick = e => {
+  e.stopPropagation();
+  if (b.dataset.nb !== 'hard') return nsPopOpen(b);
+  nsPopClose(); NB.hard.set(!G.nsHard); saveG(); nsBar();
+});
 document.addEventListener('click', e => { if (!e.target.closest('#nsPop, .nsbar')) nsPopClose(); });
 
 /* слово фразы (Ваше слово 26.11.2026): нажать — статья словаря в этом же окне (фраза уезжает вверх, перевод уходит, ниже —
@@ -1760,7 +2013,7 @@ paintTheme();
 
 /* --- подтянутое с сервера: по фразе — позднее изменение; журнал — по id; настройки — по ключу --- */
 EK.onRemote = ({ progress, log, settings }) => {
-  const byId = Object.fromEntries(LIB.map(m => [m.id, m]));
+  const byId = Object.fromEntries([...LIB, ...BLOK].map(m => [m.id, m]));
   const touched = {};
   const progFor = id => touched[id] || (touched[id] = byId[id] === M ? S : progOf(byId[id]));
   progress.forEach(r => {
@@ -1840,6 +2093,8 @@ if (!history.state || history.state.d === undefined) {
 }
 applyLoc(true);
 EK.sync();
+blokLoad();  /* фразы с блокировки: из кэша сразу, с сервера — следом */
+if (isAndr() && !EK.guest) EK.frazaKluch().then(k => { FK = k; if (shown('shelf')) renderShelf(); if (shown('settings')) renderSettings(); });
 /* статьи о происхождении — в фоне: строка «Происхождение ›» в карточке слова и долгое нажатие без ожидания (≈ 1,7 МБ один раз) */
 if (LIB.some(m => (m.lang || 'el') === 'el')) setTimeout(() => Slovar.etimLoad().catch(e => console.warn('этимология:', e)), 1500);  /* подтянуть с сервера то, что изменилось на других устройствах */
 

@@ -100,6 +100,7 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 #nasluh.dict .ns-f { font-size: calc(24px + var(--up)); }
 #nasluh.dict .ns-ru, #nasluh.dict .ns-hint, #nasluh.dict .ns-ctl, #nasluh.dict .ns-msg { display: none; }
 #nsDict .slv-row, #nsDict .slv-st, #nsDict .slv-bar, #nsDict .slv-list { display: none !important; }
+#eSlv .slv-row, #eSlv .slv-list { display: none !important; }  /* статья словаря из карточки слова: без поиска и списка; ход загрузки виден */
 #nsDict { animation: nsUp .28s ease; }
 @keyframes nsUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .ns-card, .ns-f { transition: none; } #nsDict { animation: none; } }
@@ -110,6 +111,8 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .nsbar .nb b { font-weight: 600; font-size: calc(12px + var(--up) / 2); color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .nsbar .nb[aria-expanded="true"] { background: var(--accent-soft); }
 .nsbar .nb[aria-expanded="true"] b, .nsbar .nb[aria-expanded="true"] svg { color: var(--accent); }
+.nsbar .nb[aria-pressed="true"] svg, .nsbar .nb[aria-pressed="true"] b { color: var(--accent); }
+.nsbar .nb[aria-pressed="true"] svg path { fill: currentColor; fill-opacity: .25; }
 .nspop { position: fixed; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 6; width: min(300px, calc(100vw - 24px)); background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18); display: grid; gap: 10px; }
 .nspop h3 { margin: 0; font-size: calc(13px + var(--up)); color: var(--muted); font-weight: 600; }
 .nspop .seg { display: flex; } .nspop .seg button { flex: 1; }
@@ -123,6 +126,16 @@ table.kr tr.kr-gr th, table.kr tr.kr-gr td { padding-top: 6px; }
 table.kr th span { color: var(--accent); }
 .kr4 { font: calc(15px + var(--up))/1.4 var(--f-el); color: var(--ink); }
 .kr:empty { display: none; }
+.fr-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
+.fr-top h2 { margin: 0; font-size: calc(22px + var(--up)); }
+.fr-list { display: grid; gap: 0; }
+.fr-row { display: grid; gap: 2px; padding: 12px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.fr-row:first-child { border-top: 0; }
+.fr-f { font-weight: 600; font-size: calc(18px + var(--up)); }
+.fr-star { color: #e0a800; }
+.kr-v { display: grid; gap: 2px; font: calc(15px + var(--up))/1.35 var(--f-el); }
+.kr-v p { margin: 0; }
+.kr-v b { font: 600 calc(12px + var(--up)) var(--f-ui); color: var(--muted); margin-right: 4px; }
 .gloss table.kr, .e-head table.kr { margin: 2px 0 0; }
 .hidden { display: none !important; }
 .sqs { display: inline-flex; gap: 14px; margin-left: 14px; font-variant-numeric: tabular-nums; vertical-align: middle; }
@@ -239,7 +252,7 @@ table.kr th span { color: var(--accent); }
 
 /* занятие */
 .big { font: 400 calc(26px + var(--up))/1.35 var(--f-el); min-height: 2.7em; }
-.w { cursor: pointer; border-bottom: 1px dotted var(--muted); }
+.w { cursor: pointer; }  /* без подчёркивания: статья есть у каждого слова (Ваше слово 27.11.2026) */
 .ru-line { color: var(--muted); font-size: calc(26px + var(--up)); line-height: 1.35; }  /* перевод — кеглем оригинала (.big 26) */
 .line .ru-line { font-size: calc(19px + var(--up)); }  /* кеглем сверки (.cmp .el 19) */
 .hint { font-weight: 600; }
@@ -283,6 +296,13 @@ table.kr th span { color: var(--accent); }
 .line .known { color: var(--muted); }
 .gloss { background: var(--paper); border-radius: 10px; padding: 12px; display: grid; gap: 4px; font-size: calc(15px + var(--up)); }
 .gloss .el { font-size: calc(18px + var(--up)); }
+.gloss, .gloss > * { min-width: 0; overflow-wrap: anywhere; }  /* ни одна строка карточки не шире экрана */
+.gl-head { display: flex; align-items: center; gap: 4px; }
+.gl-w { border: 0; background: none; padding: 0; font: 600 calc(20px + var(--up)) var(--f-el); color: var(--accent); text-align: left; cursor: pointer; }
+span.gl-w { color: var(--ink); cursor: auto; }
+.gl-say { border: 0; background: none; color: var(--muted); padding: 6px; margin: -6px 0; display: inline-flex; border-radius: 10px; cursor: pointer; flex: none; }
+.gl-say svg { width: calc(22px + var(--up)); height: calc(22px + var(--up)); }
+.gl-say.on { color: var(--accent); }
 .forms { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
 .forms span:nth-child(odd) { color: var(--muted); font-size: calc(13px + var(--up)); padding-top: 2px; }
 .lines { display: grid; gap: 14px; }
@@ -414,7 +434,9 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <div class="srow" id="setLevelCard"><span>Уровень</span><div class="seg" id="setLevel" role="group" aria-label="Уровни на полке"></div></div>
     <div class="srow"><span>Размер шрифта</span><span class="rng"><button class="val" id="setBigV" aria-expanded="false" aria-label="Размер шрифта"></button><span class="pop hidden"><input type="range" id="setBig" min="0" max="5" step="1" aria-label="Размер шрифта"></span></span></div>
     <div class="srow"><span>Обратный перевод — кол-во фраз</span><span class="rng"><button class="val" id="setBtNV" aria-expanded="false" aria-label="Обратный перевод — фраз за раз"></button><span class="pop hidden"><input type="range" id="setBtN" min="1" max="3" step="1" aria-label="Обратный перевод — фраз за раз"></span></span></div>
+    <div class="srow"><span>Голос</span><div class="seg" id="setGolos" role="group" aria-label="Голос озвучки"><button data-g="azure">Azure</button><button data-g="tel">телефона</button></div></div>
     <a class="srow go hidden" id="setFraza" href="intent://fraza#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Фраза на экране блокировки</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a>
+    <a class="srow go hidden" id="setObn" href="intent://fraza/obnovlenie#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Обновление программы</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a>
   </section>
   <details class="card howto hidden" id="setUsers">
     <summary><h2>Пользователи</h2><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
@@ -460,7 +482,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <nav class="nsbar" aria-label="Настройки «На слух»"><div>
     <button class="nb" data-nb="rate" aria-expanded="false" aria-label="Скорость речи"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 14 4-5"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/></svg><b></b></button>
     <button class="nb" data-nb="src" aria-expanded="false" aria-label="Откуда фразы"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><b></b></button>
-    <button class="nb" data-nb="hard" aria-expanded="false" aria-label="Сложность"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 20 6-10 4 6 3-4 5 8z"/></svg><b></b></button>
+    <button class="nb" data-nb="hard" aria-pressed="false" aria-label="Только сложные фразы"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 20 6-10 4 6 3-4 5 8z"/></svg><b></b></button>
     <button class="nb" data-nb="pause" aria-expanded="false" aria-label="Пауза после повтора"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12M6 22h12M7 2v3l5 7-5 7v3M17 2v3l-5 7 5 7v3"/></svg><b></b></button>
   </div></nav>
   <div class="nspop hidden" id="nsPop" role="dialog"></div>
@@ -572,6 +594,12 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <p class="muted hidden" id="cDone">Проверять больше нечего — до завтра.</p>
 </main>
 
+<!-- «Фразы · N» — история фраз экрана блокировки (с телефона, через сервер); 27.11.2026 -->
+<main id="fraza" class="hidden">
+  <div class="fr-top"><h2 id="frN">Фразы</h2><button class="link" id="frSort"></button></div>
+  <section class="card fr-list" id="frList"></section>
+</main>
+
 <main id="words" class="hidden">
   <div class="bar"><span class="ttl">Слова</span></div>
   <div class="wstat"><b id="wN"></b><span class="muted" id="wTop"></span></div>
@@ -626,6 +654,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <div class="bar"><span class="ttl" id="eTtl">Происхождение</span>
       <button class="icon" id="eHist" aria-label="История просмотров"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button></div>
     <div id="eBody" style="display:grid;gap:18px"></div>
+    <div id="eSlv" class="hidden"></div>
   </div>
 </section>
 
