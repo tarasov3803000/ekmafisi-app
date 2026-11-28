@@ -619,11 +619,16 @@ const sozdat = LANG => {
 .slv-star svg { width: 1.2em; height: 1.2em; }
 .slv-star.on { color: var(--accent); }
 .slv-star.on svg { fill: currentColor; }
-.slv-list .slv-vk { display: flex; gap: 18px; padding: 10px 14px 4px; }
-.slv-list .slv-vk button { display: inline; border: 0; padding: 0; background: none; font-size: calc(12px + var(--up, 0px)); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
-.slv-list .slv-vk button[aria-pressed="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
-.slv-list .slv-vk button:active { background: none; }
-.slv-list .slv-vk + button { border-top: 0; }
+/* избранное — звезда в поле поиска справа (28.11.2026, вместо вкладок «История · Избранные» над списком): видна, когда есть избранные
+   и поле пустое (с набранным словом справа — крестик очистки); поле ужимается под неё. Нажата — под строкой избранные, ещё раз — история */
+.slv-qw { position: relative; flex: 1; min-width: 0; display: flex; }
+.slv-qw.iz .slv-q { padding-right: calc(1.4em + 20px); }
+.slv-izq { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); width: calc(1.4em + 14px); height: calc(1.4em + 14px); font-size: calc(18px + var(--up, 0px)); border: 0; border-radius: 10px; background: none; color: var(--muted); display: none; place-items: center; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.slv-qw.iz .slv-izq { display: grid; }
+.slv-izq svg { width: 1.15em; height: 1.15em; }
+.slv-izq[aria-pressed="true"] { color: var(--accent); }
+.slv-izq[aria-pressed="true"] svg { fill: currentColor; }
+.slv-izq:active { background: var(--accent-soft); }
 .slv-var { margin: -6px 0 0; font-size: calc(14px + var(--up, 0px)); color: var(--muted); }
 .slv-note { margin: 0; font-size: calc(15px + var(--up, 0px)); background: var(--paper); border-radius: 10px; padding: 8px 12px; }
 .slv-z { margin: 0; padding-left: 24px; display: grid; gap: 12px; }
@@ -920,13 +925,13 @@ const sozdat = LANG => {
     css();
     /* поле без подсказок: нестандартное name/id, autocomplete/autocorrect выкл. — Chrome не подставляет прошлые вводы, клавиатура не правит */
     root.innerHTML = `<div class="slv${ANDROID ? ' android' : ''}${opts.dve ? ' dve' : ''}"><div class="slv-lev">
-      <div class="slv-row"><input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="${YAZ.im} или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other"></div>
+      <div class="slv-row"><div class="slv-qw"><input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="${YAZ.im} или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other"><button class="slv-izq" type="button" aria-pressed="false">${STAR}</button></div></div>
       <p class="slv-st"></p><div class="slv-bar hidden"><i></i></div>
       <div class="slv-list"></div></div>
       <article class="slv-art hidden"></article></div>`;
     root.style.minWidth = '0';  /* и в сетке страницы-хозяина */
     if (opts.aside) root.querySelector('.slv-row').appendChild(opts.aside);  /* шестерёнка приложения — в строку поиска, справа */
-    const $ = sel => root.querySelector(sel), q = $('.slv-q'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
+    const $ = sel => root.querySelector(sel), q = $('.slv-q'), izq = $('.slv-izq'), qw = $('.slv-qw'), st = $('.slv-st'), list = $('.slv-list'), art = $('.slv-art');
     const artY = new Map();  /* статья → прокрутка, когда ушли из неё в другую: «назад» — на то же место */
     /* клавиатура не вылезает при возврате в приложение (27.11.2026): уходя, поле поиска теряет фокус — иначе телефон, вернувшись,
        снова поднимает клавиатуру над полем, в котором остался курсор. Фокус по нажатию на поле — как прежде */
@@ -957,7 +962,14 @@ const sozdat = LANG => {
     /* под полем — только загрузка и ошибки; число статей — в настройках (Ваше слово 27.11.2026; Slovar.opisanie) */
     const status = () => { st.textContent = ''; if (D) try { localStorage.setItem(STATEY, String(D.ptr.n || D.n)); } catch (e) {} };
     const markCur = () => list.querySelectorAll('button[data-l]').forEach(b => b.classList.toggle('cur', b.dataset.l === cur));
-    const drawList = () => { drawList0(); markCur(); };
+    const drawList = () => { drawList0(); markCur(); izPaint(); };
+    /* что под пустой строкой: n — история (недавние), i — избранные; избранных нет — история */
+    const vkl = () => izbr().length && (readJ(VKL) || 'n') === 'i' ? 'i' : 'n';
+    function izPaint() {
+      const on = !!izbr().length && !q.value.trim(), p = on && vkl() === 'i', t = p ? 'Показать историю' : 'Показать избранные';
+      qw.classList.toggle('iz', on);
+      izq.setAttribute('aria-pressed', String(p)); izq.setAttribute('aria-label', t); izq.dataset.tip = t;
+    }
     function drawList0() {
       const val = q.value.trim();
       if (!val) {  /* «История» — вся история поиска (открытые статьи), из памяти телефона; видна и пока словарь открывается */
@@ -966,11 +978,10 @@ const sozdat = LANG => {
           rec = (readJ(RECENT) || []).map(by).filter(i => i !== undefined).map(rowOf);
           if (rec.length) try { localStorage.setItem(RECENT2, JSON.stringify(rec)); } catch (e) {}
         }
-        const iz = izbr(), vk = iz.length && (readJ(VKL) || 'n') === 'i' ? 'i' : 'n';  /* вкладки — когда есть избранные */
-        const shap = iz.length ? `<div class="slv-vk"><button data-vkl="n" aria-pressed="${vk === 'n'}">${rec.length ? 'История · ' + num(rec.length) : 'Самые частые'}</button><button data-vkl="i" aria-pressed="${vk === 'i'}">Избранные · ${iz.length}</button></div>` : '';
-        list.innerHTML = vk === 'i' ? shap + iz.map(rowHtml).join('')
-          : rec.length ? (shap || `<h3>История · ${num(rec.length)}</h3>`) + rec.map(rowHtml).join('')
-          : D ? (shap || '<h3>Самые частые</h3>') + chastye(50).map(i => rowHtml(rowOf(i))).join('') : shap;
+        const iz = izbr(), vk = vkl();
+        list.innerHTML = vk === 'i' ? `<h3>Избранные · ${num(iz.length)}</h3>` + iz.map(rowHtml).join('')
+          : rec.length ? `<h3>История · ${num(rec.length)}</h3>` + rec.map(rowHtml).join('')
+          : D ? '<h3>Самые частые</h3>' + chastye(50).map(i => rowHtml(rowOf(i))).join('') : '';
         return;
       }
       if (!D) return;
@@ -982,8 +993,14 @@ const sozdat = LANG => {
     window.addEventListener('slovar-novoe', () => { status(); if (!cur) { if (q.value.trim()) { res = search(q.value); drawList(); } else drawList(); } });
     let t = 0;
     q.addEventListener('input', () => {
-      if ((cur || hist) && !dva()) { cur = null; curS = null; hist = false; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); }  /* печатает поверх статьи — к списку, один шаг назад */
-      clearTimeout(t); t = setTimeout(run, 120);
+      kSpisku();  /* печатает поверх статьи — к списку, один шаг назад */
+      izPaint(); clearTimeout(t); t = setTimeout(run, 120);
+    });
+    function kSpisku() { if ((cur || hist) && !dva()) { cur = null; curS = null; hist = false; showTok++; art.classList.add('hidden'); list.classList.remove('hidden'); st.classList.remove('hidden'); opts.onBack && opts.onBack(); } }
+    izq.addEventListener('click', () => {
+      if (lpDone) { lpDone = false; return; }  /* долгим нажатием смотрели подсказку */
+      try { localStorage.setItem(VKL, JSON.stringify(vkl() === 'i' ? 'n' : 'i')); } catch (e) {}
+      kSpisku(); drawList(); naverh();
     });
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && res.length) { q.blur(); pick(row(res[0]).l); } });
     /* клавиатура компьютера (две панели): ↓ из поля — в список, ↑↓ по списку, Enter — статья, Esc — в поле; буква где угодно — в поиск */
@@ -1005,7 +1022,6 @@ const sozdat = LANG => {
     list.addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.more) { shown += 100; drawList(); return; }
-      if (b.dataset.vkl) { try { localStorage.setItem(VKL, JSON.stringify(b.dataset.vkl)); } catch (e) {} drawList(); return; }
       pick(b.dataset.l);
     });
     const pick = (l, m) => {
@@ -1023,12 +1039,14 @@ const sozdat = LANG => {
       tip.style.top = Math.max(8, r.top - tip.offsetHeight - 8) + 'px';
       clearTimeout(tipT); tipT = setTimeout(() => tip.classList.add('hidden'), 1600);
     }
-    art.addEventListener('pointerdown', e => {
-      const b = e.target.closest('[data-tip]'); lpDone = false; clearTimeout(lp);
-      if (b) lp = setTimeout(() => { lpDone = true; showTip(b); }, 450);
+    [art, izq].forEach(el => {  /* значки статьи и звезда в поле поиска */
+      el.addEventListener('pointerdown', e => {
+        const b = e.target.closest('[data-tip]'); lpDone = false; clearTimeout(lp);
+        if (b) lp = setTimeout(() => { lpDone = true; showTip(b); }, 450);
+      });
+      ['pointerup', 'pointercancel'].forEach(ev => el.addEventListener(ev, () => clearTimeout(lp)));  /* прокрутка пальцем — pointercancel */
+      el.addEventListener('contextmenu', e => { if (e.target.closest('[data-tip]')) e.preventDefault(); });
     });
-    ['pointerup', 'pointercancel'].forEach(ev => art.addEventListener(ev, () => clearTimeout(lp)));  /* прокрутка пальцем — pointercancel */
-    art.addEventListener('contextmenu', e => { if (e.target.closest('[data-tip]')) e.preventDefault(); });
 
     /* долгое нажатие на слово (≈ 450 мс) — сразу его статья о происхождении (решение 5.11.2026, как в Экмафиси): заголовок
        статьи, греческое слово примера или выражения, строка списка; обычное нажатие — как прежде. Палец сдвинулся — не в счёт */
@@ -1086,6 +1104,7 @@ const sozdat = LANG => {
         if (on) v.unshift({ l: cur, s: s.s, b: brief(s.z.map(z => z.ru)) });
         izbrSet(v);
         art.querySelectorAll('.slv-star').forEach(b => b.outerHTML = starHtml(cur));
+        drawList();  /* звезда в поле поиска и список избранных (на широком он рядом) */
         return;
       }
       const b = e.target.closest('.slv-say');
