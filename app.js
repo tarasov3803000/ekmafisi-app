@@ -668,17 +668,25 @@ function openEtym(l, src) {  /* src — откуда открыто: слово 
 }
 /* статья словаря из карточки слова (Ваше слово 27.11.2026) — окном поверх, на любом экране: тот же «Словарь», без поиска и списка;
    слово примера и «Происхождение ›» внутри — шаги истории, «назад» — на шаг выше */
-let SLVE = null;
-const slvE = () => SLVE || (SLVE = Slovar.mount($('eSlv'), {
+/* словарь своего языка в общем месте (окно поверх, «На слух»; 28.11.2026): у каждого языка — свой ящик внутри, виден нужный */
+function yazBox(root, opts) {
+  const A = {};
+  return (lang = 'el') => {
+    const a = A[lang] || (A[lang] = (() => { const b = document.createElement('div'); b.dataset.lang = lang; root.appendChild(b); return Slovar.yazyk(lang).mount(b, opts(lang)); })());
+    [...root.children].forEach(b => b.classList.toggle('hidden', b.dataset.lang !== lang));
+    return a;
+  };
+}
+const slvE = yazBox($('eSlv'), lang => ({
   backLbl: 'назад',
-  onPick: (l, m) => { push(curHash(), { k: 'slv', l, m: m || null }); openSheet(history.state.sheet); },
+  onPick: (l, m) => { push(curHash(), { k: 'slv', l, m: m || null, lang }); openSheet(history.state.sheet); },
   onBack: () => history.back()
 }));
 function openSheet(sh) {
   sheetNow = sh; $('etym').scrollTop = 0;
   const slv = sh.k === 'slv';
   $('eBody').classList.toggle('hidden', slv); $('eSlv').classList.toggle('hidden', !slv); $('eHist').classList.toggle('hidden', slv);
-  if (slv) { $('eTtl').textContent = 'Словарь'; slvE().show(sh.l, sh.m); }
+  if (slv) { $('eTtl').textContent = 'Словарь'; slvE(sh.lang).show(sh.l, sh.m); }
   else sh.k === 'hist' ? renderHist() : sh.k === 'senses' ? renderSenses(sh.l) : sh.k === 'word' ? renderWord(sh.l) : renderEtym(sh.l);
   $('etym').classList.remove('hidden'); document.body.style.overflow = 'hidden';
 }
@@ -754,11 +762,12 @@ function renderHist() {
 /* нажатия внутри карточки и окон — одним слушателем: «Значения» и data-etym открывают своё окно */
 document.addEventListener('click', e => {
   const v = e.target.closest('[data-slv]');
-  if (v && !v.closest('.slv')) { e.stopPropagation(); push(curHash(), { k: 'slv', l: v.dataset.slv, m: null }); openSheet(history.state.sheet); return; }
+  if (v && !v.closest('.slv')) { e.stopPropagation(); push(curHash(), { k: 'slv', l: v.dataset.slv, m: null, lang: v.dataset.lang || 'el' }); openSheet(history.state.sheet); return; }
   const z = e.target.closest('[data-say]');
   if (z) {
     e.stopPropagation();
-    if ((M && M.lang || 'el') === 'el') Slovar.skazat(z.dataset.say, z);
+    const yz = (M && M.lang) || 'el';
+    if (SLV_YAZ.includes(yz)) Slovar.yazyk(yz).skazat(z.dataset.say, z);  /* свой голос по запросу (кэш), нет — голос телефона */
     else { const vc = voiceOf(M.lang); if (vc) { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(z.dataset.say); u.voice = vc; u.lang = vc.lang; speechSynthesis.speak(u); } }
     return;
   }
@@ -1734,10 +1743,10 @@ function enFill(el) {
     if (el.dataset.ru === '0' && s.z.length) h.push(`<div>${esc(cap(s.z.slice(0, 3).map(z => z.ru).join('; ')))}</div>`);
     if (s.i) h.push(`<div class="small muted" lang="en">${esc(s.i)}</div>`);
     if (s.f3 && el.dataset.f3 === '0') h.push(`<div class="el">${esc(s.f3.join(' · '))}</div>`);
-    /* «Значения» — по слову в заголовке карточки (как у main с 27.11: ссылки «Значения» под карточкой нет); в окне «Слово»
-       заголовка-кнопки нет — ссылкой */
-    const hw = el.parentElement.querySelector('span.gl-w');
-    if (hw) hw.outerHTML = `<button class="gl-w el" lang="en" data-senses="${esc(s.l)}">${hw.innerHTML}</button>`;
+    /* слово в заголовке карточки — вся статья словаря окном поверх, как у греческого (28.11.2026); в окне «Слово»
+       заголовка-кнопки нет — ссылкой «Значения» */
+    const hw = el.parentElement.querySelector('.gl-w');
+    if (hw) hw.outerHTML = `<button class="gl-w el" lang="en" data-slv="${esc(s.l)}" data-lang="en">${hw.innerHTML}</button>`;
     else if (!el.parentElement.querySelector(`[data-senses="${CSS.escape(el.dataset.ensl)}"]`)) h.push(`<div class="gl-links"><button class="link" data-senses="${esc(s.l)}">Значения</button></div>`);
     el.innerHTML = h.join('');
   }, () => {});
@@ -1773,7 +1782,8 @@ const NS_RATES = [1, 0.9, 0.8];  /* скорость речи на языке (G
 const nsRate = () => NS_RATES.includes(+G.nsRate) ? +G.nsRate : 1;
 const nsSleep = (ms, tok) => new Promise((ok, no) => setTimeout(() => tok === NS.tok ? ok() : no('stop'), ms));
 const nsShuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const nsSrcOk = s => s === 'slovar' ? G.lang === 'el' : true;
+/* «из словаря» — у языков со своим словарём (английский — 28.11.2026); файла примеров ещё нет (звук не озвучен) — NS.primNet */
+const nsSrcOk = s => s === 'slovar' ? SLV_YAZ.includes(G.lang || 'el') && !(NS.primNet || {})[G.lang || 'el'] : true;
 const nsZvKey = p => new URL('slovar/' + p, location.origin + '/').href;  /* кэш звука словаря — общий с экраном «Словарь» (slovar.js) */
 async function nsRuIndex() {  /* указатель русской озвучки; нет файла или сети — undefined → null, голос телефона */
   if (NS.ru === undefined) NS.ru = await EK.content('el/slovar2-ru.json', navigator.onLine).then(r => r.ok ? r.json() : null).catch(() => null);
@@ -1781,9 +1791,16 @@ async function nsRuIndex() {  /* указатель русской озвучк�
 }
 async function nsList(src) {
   nsRuIndex();
+  const lang = G.lang || 'el';
   if (src === 'slovar') {
-    if (!NS.prim) NS.prim = await (await EK.content('el/slovar2-primery.json', navigator.onLine)).json();
-    return nsShuffle(NS.prim.p.map(x => ({ f: x.f, ru: x.ru, podp: x.l, lem: x.l.split(' — ')[0].replace(/^(?:ο|η|το|οι|τα|ο\/η)\s+/, ''), z: `el/zvuk-prim/${NS.prim.g}/${x.z}.mp4` })));
+    NS.prim = NS.prim || {}; NS.primNet = NS.primNet || {};
+    if (!NS.prim[lang]) {
+      const r = await EK.content(lang + '/slovar2-primery.json', navigator.onLine).catch(() => null);
+      if (r && r.ok) NS.prim[lang] = await r.json();
+      else { NS.primNet[lang] = true; return nsList('teksty'); }  /* примеров со звуком у языка пока нет — фразы обучения */
+    }
+    const P = NS.prim[lang];
+    return nsShuffle(P.p.map(x => ({ f: x.f, ru: x.ru, podp: x.l, lem: x.l.split(' — ')[0].replace(/^(?:ο|η|το|οι|τα|ο\/η)\s+/, ''), z: `${lang}/zvuk-prim/${P.g}/${x.z}.mp4` })));
   }
   const all = LIB.filter(onShelf), started = all.filter(m => progOf(m).log.length);
   return nsShuffle((started.length ? started : all).flatMap(m => m.phrases.map(p => ({ f: TX(p), ru: p.ru, podp: TTL(m), m, p }))));
@@ -1857,9 +1874,21 @@ function nsPhone(text, lang, rate, tok) {  /* голосом телефона; o
 }
 /* фраза — словами: у фраз текстов слово знает свою лемму (words), у фраз словаря — только форму: статья ищется по форме,
    как в поиске «Словаря». Словарь — греческий; у английского слова не нажимаются */
-const NS_GRW = /[\u0370-\u03ff\u1f00-\u1fff]+/g;
+const NS_GRW = /[\u0370-\u03ff\u1f00-\u1fff]+/g, NS_ENW = /[A-Za-z]+(?:['’][A-Za-z]+)*/g;
 function nsFHtml(x) {
-  if ((G.lang || 'el') !== 'el') return esc(x.f);
+  const lang = G.lang || 'el';
+  if (!SLV_YAZ.includes(lang)) return esc(x.f);
+  if (lang !== 'el') {  /* английский (28.11.2026): слово фразы текста — его лемма из words; фразы словаря — форма, статья по поиску */
+    const RW = NS_ENW, sp = (t, l) => `<span class="nsw" data-l="${esc(l)}" lang="en">${esc(t)}</span>`;
+    if (!x.p) return esc(x.f).replace(RW, w => sp(w, w));
+    let h = '', at = 0;
+    x.p.words.forEach(w => {
+      const pos = x.f.indexOf(w.t, at); if (pos < 0) return;
+      h += esc(x.f.slice(at, pos)) + (w.l && /[A-Za-z]/.test(w.t) ? sp(w.t, w.l) : esc(w.t));
+      at = pos + w.t.length;
+    });
+    return h + esc(x.f.slice(at));
+  }
   const sp = (t, l) => `<span class="nsw" data-l="${esc(l)}">${esc(t)}</span>`;
   if (!x.p) return esc(x.f).replace(NS_GRW, w => sp(w, w));
   let h = '', at = 0;
@@ -1985,16 +2014,17 @@ document.addEventListener('click', e => { if (!e.target.closest('#nsPop, .nsbar'
    статья целиком), подержать — происхождение тем же путём; второе нажатие в любом месте фразы — назад к исходному виду.
    Каждое открытие — шаг истории (sheet { k: 'nsd' }): системное «назад» и «← к фразе» идут на шаг выше. Пока открыт словарь,
    звук стоит; вернулись — играет дальше, если играл */
-let NSD = null;
-const nsDictApi = () => NSD || (NSD = Slovar.mount($('nsDict'), {
+const nsDictApi = yazBox($('nsDict'), lang => ({
   backLbl: 'к фразе',
-  onPick: (l, m) => { push('nasluh', { k: 'nsd', l, m: m || null }); NSD.show(l, m); },
+  onPick: (l, m) => { push('nasluh', { k: 'nsd', l, m: m || null, lang }); nsDictApi(lang).show(l, m); },
   onBack: () => history.back()
 }));
 function nsDictOpen(l, m) {
   if (!$('nasluh').classList.contains('dict')) NS.d0 = depth();
+  const lang = G.lang || 'el';
+  if (lang !== 'el' && m === 'etym') m = null;  /* происхождения у английского пока нет (бэклог 28.11.2026) — долгое касание = статья */
   if (m === 'etym' && Slovar.etimSync(l)) Slovar.etimZapis(l);
-  push('nasluh', { k: 'nsd', l, m: m || null }); nsDict(history.state.sheet);
+  push('nasluh', { k: 'nsd', l, m: m || null, lang }); nsDict(history.state.sheet);
 }
 function nsDictClose() {
   const n = depth() - (NS.d0 ?? depth());
@@ -2006,7 +2036,7 @@ function nsDict(sh) {
   if (on) {
     if (!box.classList.contains('dict')) { NS.wasOn = NS.on; nsStop(); nsPopClose(); }
     box.classList.add('dict'); $('nsDict').classList.remove('hidden');
-    nsDictApi().show(sh.l, sh.m);
+    nsDictApi(sh.lang).show(sh.l, sh.m);
     $('nsF').querySelectorAll('.nsw').forEach(w => w.classList.toggle('sel', w.dataset.l === sh.l));
   } else if (box.classList.contains('dict')) {
     box.classList.remove('dict'); $('nsDict').classList.add('hidden');

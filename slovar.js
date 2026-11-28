@@ -27,7 +27,7 @@ const VSE = {};  /* язык → его словарь (одна копия на
 const sozdat = LANG => {
   const EL = LANG === 'el', SFX = EL ? '' : '.' + LANG;
   const YAZ = { el: { rod: 'греческого', im: 'Греческое', po: 'по-гречески, латиницей и по-русски', golos: 'athina' },
-    en: { rod: 'английского', im: 'Английское', po: 'по-английски и по-русски', golos: 'ava' } }[LANG] || { rod: LANG, im: LANG, po: LANG, golos: '' };
+    en: { rod: 'английского', im: 'Английское', po: 'по-английски и по-русски', golos: 'aoede' } }[LANG] || { rod: LANG, im: LANG, po: LANG, golos: '' };
   const CACHE = EL ? 'ekmafisi-slovar-v1' : `ekmafisi-slovar-${LANG}-v1`, ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = LANG + '/slovar2.json', RECENT = 'ekmafisi.slovar.nedavno' + SFX;
   const VKL = 'slovar-vkladka' + SFX;  /* открытая вкладка пустого поиска: n — недавние, i — избранные */
   const RECENT2 = 'ekmafisi.slovar.nedavno2' + SFX;  /* недавние со строкой списка { l, s, b } — видны, пока словарь открывается */
