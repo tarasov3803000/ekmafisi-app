@@ -284,7 +284,7 @@ table.kr th span { color: var(--accent); }
 /* выражение целиком (idioms) — над статьёй нажатого слова */
 .idm { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .idm .el { font-weight: 600; }
-/* «Обратный перевод»: строка — сетка; справа свой столбец: выучено · трудно · не знаю · глаз */
+/* «Обратный перевод»: строка — сетка; справа свой столбец: выучено · трудно · не знаю */
 .line.has-mk { grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: start; }
 .line.has-mk > .slot { grid-column: 1; grid-row: 1; }
 .line.has-mk > .ru-line { grid-column: 1; grid-row: 2; }
@@ -296,13 +296,9 @@ table.kr th span { color: var(--accent); }
 .mk[data-lrn][aria-pressed="true"] { color: var(--g); background: var(--g-soft); }
 .mk.y { color: var(--y); } .mk.r { color: var(--r); }
 .mk.y[aria-pressed="true"] { background: var(--y-soft); } .mk.r[aria-pressed="true"] { background: var(--r-soft); }
-.mk.eye { color: var(--accent); }
-.mk.eye[aria-pressed="true"] { background: var(--accent-soft); }
-.mk.off { visibility: hidden; }  /* глаз на сверке не нужен, но место держит */
 /* нажатие на русский и греческий — не выделение: иначе Chrome на Android показывает «Поиск по нажатию» */
 #bt .line { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #bt .line textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
-.dots { font: 400 calc(20px + var(--up))/1.4 var(--f-el); color: var(--muted); letter-spacing: .15em; }
 .grade { justify-self: start; font-size: calc(13px + var(--up)); font-weight: 700; border-radius: 999px; padding: 2px 10px; }
 .grade.g { background: var(--g-soft); color: var(--g); } .grade.y { background: var(--y-soft); color: var(--y); } .grade.r { background: var(--r-soft); color: var(--r); }
 .line .known { color: var(--muted); }
@@ -323,11 +319,17 @@ span.gl-w { color: var(--ink); cursor: auto; }
 .line .ru { font-size: calc(20px + var(--up)); }  /* «Обратный перевод»: что сказать по-гречески */
 .line.playing .el { color: var(--accent); }
 textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(--f-el); border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--paper); color: var(--ink); resize: vertical; }
+/* поле «Обратного перевода» сразу во весь будущий ввод: невидимый двойник с тем же шрифтом задаёт высоту */
+.ta { display: grid; }
+.ta > .ta-g, .ta > textarea { grid-area: 1 / 1; font: calc(18px + var(--up))/1.4 var(--f-el); padding: 10px; border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ta > .ta-g { visibility: hidden; }
+.ta > textarea { min-height: 0; height: 100%; resize: none; overflow: hidden; }
 .cmp { display: grid; gap: 4px; }
 .cmp .el { font-size: calc(19px + var(--up)); }
 .cmp .you { color: var(--aegean); margin-bottom: 6px; }  /* своё — эгейским, под ним с небольшим пропуском верное */
 .cx { background: var(--r-soft); box-shadow: inset 0 -2px var(--r); }  /* неверная или лишняя буква в своём; пропущенная или заменённая — в верном */
 .ca { background: var(--y-soft); box-shadow: inset 0 -2px var(--y); }  /* только ударение */
+.cw { border-radius: 3px; padding: 0 2px; }  /* в верном — слово целиком */
 .bad { background: var(--r-soft); text-decoration: line-through; text-decoration-color: var(--r); }
 .miss { background: var(--r-soft); border-bottom: 2px solid var(--r); }
 
@@ -587,7 +589,6 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 
 <main id="bt" class="hidden">
   <div class="bar"><span class="ttl">Обратный перевод</span><span class="cnt" id="bCnt"></span></div>
-  <p class="sub" id="bSub"></p>
   <section class="card">
     <div class="lines" id="bLines"></div>
     <div class="ctl c4">
@@ -596,8 +597,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
       <button class="ic faster" aria-label="Быстрее"></button>
       <button class="ic eye" id="bEye" aria-pressed="false" aria-label="Скрыть оригинал"></button>
     </div>
-    <button class="btn primary wide" id="bNext">Далее</button>
-    <button class="btn primary wide hidden" id="bCheck">Сверить</button>
+    <button class="btn primary wide" id="bCheck">Сверить</button>
     <div class="row hidden" id="bS3"><button class="btn" id="bAgain" style="flex:1">Ещё раз</button><button class="btn primary" id="bOn" style="flex:1">Далее</button></div>
   </section>
 </main>

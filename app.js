@@ -898,13 +898,13 @@ $('sDone').onclick = () => {
   skorRender(); window.scrollTo(0, 0);
 };
 
-/* --- Обратный перевод: один экран — шаг 1 (читать и слушать), шаг 2 (поле на каждую фразу), шаг 3 — сверка ---
-   Русский и греческий не двигаются: на месте греческого — точки (по одной на слово), потом поля, потом сверка.
-   Справа у фразы столбец: «выучено» · «трудно» · «не знаю» · глаз. Глаз на шаге 2 — «или-или»: виден оригинал — поля нет,
-   скрыт — поле с написанным (Ваше слово, 7 ноября 2026). Под фразами — звук на всех шагах, ниже — кнопки шага.
+/* --- Обратный перевод: один экран — шаг 2 (поле на каждую фразу), шаг 3 — сверка; шага 1 (читать оригинал) нет — сразу русский и пустое поле (Ваше слово, 28.11.2026) ---
+   Поле сразу высотой во весь будущий ввод: под ним невидимый двойник с оригиналом (или с написанным, если оно длиннее).
+   Справа у фразы столбец: «выучено» · «трудно» · «не знаю». Глаз — один, в ряду звука, на все фразы куска: «или-или» —
+   виден оригинал — поля нет, скрыт — поле с написанным (Ваше слово, 7 ноября 2026). Под фразами — звук, ниже — кнопки шага.
    Оценку ставит сверка, по первой попытке; «Ещё раз» её не меняет; «трудно»/«не знаю», нажатые в этом куске, сверка не перебивает.
    Фразы с «выучено» полей не получают. */
-let bt = { c: 0, step: 1, hid: {}, tries: 0, res: {}, self: {}, held: {} };  /* held — оценка сверки, уступившая своей отметке */
+let bt = { c: 0, step: 2, hid: {}, tries: 0, res: {}, self: {}, held: {} };  /* held — оценка сверки, уступившая своей отметке */
 /* куски по настройке «фраз за раз» (1–3): кусок текста (по смыслу) режется ровно, не больше N фраз, через свою границу не переходит */
 let btK = [], btKey = '';
 function btPieces() {
@@ -923,21 +923,21 @@ const btPos = () => S.btI ?? ((CHUNKS[S.btAt] || CHUNKS[0])[0]);
 function btOpenAt(i, exact) { const c = btPieces().findIndex(k => k.includes(i)); btOpen(Math.max(0, c), exact); }
 const btCur = () => btPieces()[bt.c];
 const btIdx = () => btCur().filter(i => !skipped(S, P[i].id));
-const dotsOf = p => (TX(p).match(/\S+/g) || []).map(() => '•').join(' ');
 const GRADE_LBL = { g: 'знаю', y: 'с трудом', r: 'не знаю' };
 const ICO_HARD = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M12 7v6"/><path d="M12 16.8v.2"/></svg>';
 const ICO_DUNNO = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.4-2.7 4"/><path d="M12 17.2v.1"/></svg>';
-const marksHtml = i => `<div class="marks">${lrnBtn('mk', i)}<button class="mk y" data-self="${i}" data-c="y" aria-pressed="false" aria-label="Трудно — пусть вернётся пораньше">${ICO_HARD}</button><button class="mk r" data-self="${i}" data-c="r" aria-pressed="false" aria-label="Не знаю — пусть вернётся завтра">${ICO_DUNNO}</button><button class="mk eye" data-eye="${i}"></button></div>`;
+const marksHtml = i => `<div class="marks">${lrnBtn('mk', i)}<button class="mk y" data-self="${i}" data-c="y" aria-pressed="false" aria-label="Трудно — пусть вернётся пораньше">${ICO_HARD}</button><button class="mk r" data-self="${i}" data-c="r" aria-pressed="false" aria-label="Не знаю — пусть вернётся завтра">${ICO_DUNNO}</button></div>`;
 function btOpen(c, exact) {  /* exact — открыт «›» у фразы: кусок с ней, даже если вся она «выучено» */
   show('bt');
   const K = btPieces();
   c = c % K.length;
   if (!exact) for (let k = 0; k < K.length && K[c].every(i => skipped(S, P[i].id)); k++) c = (c + 1) % K.length;
-  bt = { c, step: 1, hid: {}, tries: 0, res: {}, self: {}, held: {} };
+  bt = { c, step: 2, hid: {}, tries: 0, res: {}, self: {}, held: {} };
+  btIdx().forEach(i => bt.hid[i] = true);
   $('bCnt').textContent = `${(G.btN || 3) === 1 ? 'фраза' : 'кусок'} ${c + 1} / ${K.length}`;
-  $('bSub').textContent = `Переведите фразу ${LG(M).to}, не глядя на оригинал`;
   $('bLines').innerHTML = K[c].map(i => `<div class="line has-mk" data-i="${i}"><div class="slot"></div><span class="ru-line">${esc(P[i].ru)}</span>${marksHtml(i)}<div class="gloss hidden"></div></div>`).join('');
-  btRender(); window.scrollTo(0, 0);
+  btRender(); window.scrollTo(0, 0); btFocus();
+  if (!btIdx().length) $('bCheck').click();  /* весь кусок «выучено» — сверять нечего */
 }
 /* верное из сверки — со словами, на которые можно нажать (карточка слова, статья) */
 function origTap(d, p) {
@@ -955,14 +955,11 @@ function btRender(keep) {  /* keep — что оставить в полях п�
   document.querySelectorAll('#bLines .line').forEach(l => {
     const i = +l.dataset.i, p = P[i], slot = l.querySelector('.slot'), hid = !!bt.hid[i];
     l.querySelector('.gloss').classList.add('hidden');
-    const eye = l.querySelector('[data-eye]');
-    eye.classList.toggle('off', bt.step === 3 || (bt.step === 2 && !live.has(i)));
-    paintEye(eye, hid, 'оригинал');
-    if (bt.step === 1) slot.innerHTML = hid ? `<span class="dots">${esc(dotsOf(p))}</span>` : `<span class="el">${wordsHtml(p)}</span>`;
-    else if (!live.has(i)) slot.innerHTML = `<span class="el known">${wordsHtml(p)}</span>`;
+    if (!live.has(i)) slot.innerHTML = `<span class="el known">${wordsHtml(p)}</span>`;
     else if (bt.step === 2) {
-      slot.innerHTML = `<span class="el${hid ? ' hidden' : ''}">${wordsHtml(p)}</span><textarea class="${hid ? '' : 'hidden'}" data-i="${i}" id="in-${i}" lang="${esc(M.lang || 'el')}" rows="2" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(p.ru)}"></textarea>`;
-      const v = keep ? keep[i] : cur[i]; if (v) slot.querySelector('textarea').value = v;
+      slot.innerHTML = `<span class="el${hid ? ' hidden' : ''}">${wordsHtml(p)}</span><div class="ta${hid ? '' : ' hidden'}"><div class="ta-g" aria-hidden="true"></div><textarea data-i="${i}" id="in-${i}" lang="${esc(M.lang || 'el')}" rows="1" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="${esc(p.ru)}"></textarea></div>`;
+      const t = slot.querySelector('textarea'), v = keep ? keep[i] : cur[i]; if (v) t.value = v;
+      taFit(t);
     } else {
       const r = bt.res[i];
       slot.innerHTML = `<div class="cmp">${r.a ? `<span class="el you">${r.d.u}</span>` : ''}<span class="el">${r.a ? origTap(r.d, p) : `<span class="miss">${wordsHtml(p)}</span>`}</span><span class="grade ${r.g}">${GRADE_LBL[r.g]}</span></div>`;
@@ -976,31 +973,24 @@ function btRender(keep) {  /* keep — что оставить в полях п�
     };
   });
   paintMarks();
-  const all = btCur().filter(i => bt.step === 1 || live.has(i));
+  const all = btCur().filter(i => live.has(i));
   paintEye($('bEye'), all.length > 0 && all.every(i => bt.hid[i]), 'оригинал');
   $('bEye').disabled = bt.step === 3 || !all.length;
-  $('bNext').classList.toggle('hidden', bt.step !== 1);
   $('bCheck').classList.toggle('hidden', bt.step !== 2);
   $('bS3').classList.toggle('hidden', bt.step !== 3);
   $('bOn').textContent = bt.c + 1 < btPieces().length ? 'Далее' : 'Готово';
   paintSpeed(); paintOwner();
 }
-const btFocus = i => { const t = i === undefined ? [...document.querySelectorAll('#bLines textarea:not(.hidden)')].find(x => !x.value) : $('in-' + i); if (t && !t.classList.contains('hidden')) t.focus({ preventScroll: true }); };
-/* глаз у фразы — её оригинал; глаз в ряду звука — все сразу (есть видимый — скрыть все, иначе показать все) */
-document.addEventListener('click', e => {
-  const b = e.target.closest('[data-eye]'); if (!b || !shown('bt')) return;
-  const i = +b.dataset.eye; bt.hid[i] = !bt.hid[i]; btRender();
-  if (bt.step === 2 && bt.hid[i]) btFocus(i);
-});
+const btFocus = () => { const t = [...document.querySelectorAll('#bLines .ta:not(.hidden) textarea')].find(x => !x.value); if (t) t.focus({ preventScroll: true }); };
+/* высота поля — по двойнику: оригинал или написанное, что длиннее; пробел в конце держит строку под курсором после переноса */
+function taFit(t) { const o = TX(P[+t.dataset.i]), v = t.value; t.previousElementSibling.textContent = (v.length > o.length ? v : o) + ' '; }
+$('bLines').addEventListener('input', e => { if (e.target.matches('.ta textarea')) taFit(e.target); });
+/* глаз в ряду звука — все фразы куска сразу (есть видимый оригинал — скрыть все, иначе показать все) */
 $('bEye').onclick = () => {
-  const all = btCur().filter(i => bt.step === 1 || btIdx().includes(i)), on = !all.every(i => bt.hid[i]);
-  all.forEach(i => bt.hid[i] = on); btRender();
+  const all = btIdx(), on = !all.every(i => bt.hid[i]);
+  all.forEach(i => bt.hid[i] = on); btRender(); if (on) btFocus();
 };
 $('bPlay').onclick = () => toggle($('bPlay'), () => playSeq($('bPlay'), btCur(), G.rate, i => { const l = document.querySelector(`#bLines .line[data-i="${i}"]`); l && l.classList.add('playing'); }));
-$('bNext').onclick = () => {
-  stop(); bt.step = 2; bt.hid = {}; btIdx().forEach(i => bt.hid[i] = true); btRender(); btFocus();
-  if (!btIdx().length) $('bCheck').click();  /* весь кусок «выучено» — сверять нечего */
-};
 $('bCheck').onclick = () => {
   const first = bt.tries === 0;
   stop();
@@ -1073,6 +1063,9 @@ function charDiff(u, o) {  /* слово человека и верное → р
   const html = (g, c) => g.map((x, k) => c[k] ? `<span class="${c[k]}">${esc(x.normalize('NFC'))}</span>` : esc(x.normalize('NFC'))).join('');
   return [html(a, ca), html(b, cb)];
 }
+/* в верном слово с ошибкой выделяется целиком, подложкой (Ваше слово, 28.11.2026): красной — ошибка в буквах, жёлтой — только ударение;
+   в своём — по-прежнему по буквам */
+const whole = (h, w) => h.includes('class="cx') ? `<span class="cx cw">${esc(w)}</span>` : h.includes('class="ca') ? `<span class="ca cw">${esc(w)}</span>` : h;
 function sim(u, o) {  /* 2 — то же слово (без ударений), иначе доля совпавших букв, если не меньше половины */
   const A = gl(u).map(gb), B = gl(o).map(gb);
   if (A.join('') === B.join('')) return 2;
@@ -1116,7 +1109,7 @@ function diff(user, orig, lang) {
     const qs = own(pb, k), q0 = mb[qs[0]], ka0 = q0 !== null ? pa[q0].k : -1;
     if (qs.length === 1 && q0 !== null && A[ka0].parts.length === 1) {  /* слово против слова — по буквам (ударение — пометкой) */
       if (lang === 'en' && pa[q0].p === pb[qs[0]].p) { U[ka0] = esc(A[ka0].w); O[k] = esc(x.w); gw[k] = 0; }  /* colour = color, I = i */
-      else { [U[ka0], O[k]] = charDiff(A[ka0].w, x.w); gw[k] = wordGrade(A[ka0].w, x.w); }
+      else { [U[ka0], O[k]] = charDiff(A[ka0].w, x.w); O[k] = whole(O[k], x.w); gw[k] = wordGrade(A[ka0].w, x.w); }
       okU[ka0] = true; uw[ka0] = gw[k];
     } else if (qs.every(q => mb[q] !== null && pa[mb[q]].p === pb[q].p)) {  /* все части совпали — верно, как бы ни было записано (I'm = I am) */
       O[k] = esc(x.w); gw[k] = 0;
@@ -1124,7 +1117,7 @@ function diff(user, orig, lang) {
     } else {  /* сокращение без апострофа (doesnt) — по буквам: выделяется только недостающий апостроф */
       const bare = w => w.toLowerCase().replace(/'/g, '');
       const ka = qs.map(q => mb[q]).filter(r => r !== null).map(r => pa[r].k).find(t => bare(A[t].w) === bare(x.w));
-      if (ka !== undefined) { [U[ka], O[k]] = charDiff(A[ka].w, x.w); gw[k] = wordGrade(A[ka].w, x.w); okU[ka] = true; uw[ka] = gw[k]; }
+      if (ka !== undefined) { [U[ka], O[k]] = charDiff(A[ka].w, x.w); O[k] = whole(O[k], x.w); gw[k] = wordGrade(A[ka].w, x.w); okU[ka] = true; uw[ka] = gw[k]; }
     }
   });
   /* часть слова-сокращения, сведённая с верным словом, — не лишнее */
