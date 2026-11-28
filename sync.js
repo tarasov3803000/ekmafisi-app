@@ -88,10 +88,12 @@
       saveOut(n);
 
       const cur = Object.assign({ p: '1970-01-01T00:00:00.000Z', l: '1970-01-01T00:00:00.000Z' }, readJ(K('cursor')) || {});
+      /* статистика (28.11.2026): журнал один раз — заново с начала, чтобы на устройстве были и отметки «Собери» (раньше их не хранили) */
+      if (!cur.v2) { cur.l = '1970-01-01T00:00:00.000Z'; cur.v2 = 1; }
       const back = t => iso(new Date(t).getTime() - 120000);  /* запас на запись, что закончилась позже соседней */
       const [pr, lg, st] = await Promise.all([
         sb.from('progress').select('lang,text_id,phrase_id,cut,color,written,updated_at,synced_at').gt('synced_at', back(cur.p)).order('synced_at').limit(10000),
-        sb.from('log').select('id,at,kind,lang,text_id,phrase_id,mode,color,lemma,created_at').gt('created_at', back(cur.l)).order('created_at').limit(10000),
+        sb.from('log').select('id,at,kind,lang,text_id,phrase_id,mode,color,lemma,sec,created_at').gt('created_at', back(cur.l)).order('created_at').limit(10000),
         sb.from('settings').select('data').maybeSingle()
       ]);
       if (pr.error) throw pr.error; if (lg.error) throw lg.error; if (st.error) throw st.error;

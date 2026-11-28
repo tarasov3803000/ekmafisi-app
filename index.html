@@ -397,6 +397,30 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .sw[aria-checked="true"] { background: var(--accent); }
 .sw[aria-checked="true"] i { left: 23px; }
 .upd { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 20; border: 0; border-radius: 999px; padding: 10px 18px; background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+/* «Статистика» (28.11.2026): ступень с полосой, сегодня, по дням, по режимам */
+.tbar .wok .plus { font-weight: 600; }
+.st-sum { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.st-flags { display: inline-flex; gap: 2px; }
+.st-flags .sflag { font-size: 26px; margin: 0; opacity: .45; }
+.st-flags .sflag[aria-pressed="true"] { opacity: 1; background: var(--accent-soft); }
+.st-lvl { display: grid; gap: 10px; }
+.st-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.st-h b { font-size: calc(18px + var(--up)); }
+.st-h > span { font-variant-numeric: tabular-nums; }
+.st-h h2 { margin: 0; }
+.lvbar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.lvbar span { display: block; height: 100%; background: var(--g); border-radius: 5px; }
+.st-prog { margin: 0; font-weight: 600; }
+.st-lvl .small { margin: -4px 0 0; }
+.st-mpd { display: flex; } .st-mpd button { flex: 1; }
+.st-big { margin: 0; font-size: calc(18px + var(--up)); font-variant-numeric: tabular-nums; }
+.st-dni { display: flex; align-items: flex-end; gap: 2px; height: 72px; }
+.st-dni i { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; }
+.st-dni i.z { background: var(--line); }
+.st-dax { display: flex; justify-content: space-between; margin-top: -6px; }
+.st-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0 0; border-top: 1px solid var(--line); }
+.st-row > span:first-child { white-space: nowrap; }
+.st-row > span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: no-preference) { .btn, .text { transition: transform .08s; } .btn:active, .text:active { transform: scale(.985); } }
 </style>
 </head>
@@ -453,6 +477,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 <main id="settings" class="hidden">
   <!-- всё на одном экране, строкой «название — выбор» (Ваше слово 26.11.2026); «Как пользоваться» — в окне ⓘ; ⓘ и учётная запись — значками в верхней строке, только на этом экране -->
   <section class="card set">
+    <a class="srow go" id="setStat" href="#stat"><span>Статистика</span><span class="st-sum"><span class="muted" id="setStatSum"></span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span></a>
     <div class="srow"><span>Язык изучения</span><button class="sflag" id="setLang"></button></div>
     <div class="srow" id="setLevelCard"><span>Уровень</span><div class="seg" id="setLevel" role="group" aria-label="Уровни на полке"></div></div>
     <div class="srow"><span>Размер шрифта</span><span class="rng"><button class="val" id="setBigV" aria-expanded="false" aria-label="Размер шрифта"></button><span class="pop hidden"><input type="range" id="setBig" min="0" max="5" step="1" aria-label="Размер шрифта"></span></span></div>
@@ -474,6 +499,15 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     </div>
   </details>
   <p class="small muted set-foot" id="setSlv"></p>
+</main>
+
+<!-- «Статистика» (28.11.2026, docs/zamysel.md «Статистика — решено 28 ноября 2026»): по языку; флаги — если занимались на двух -->
+<main id="stat" class="hidden">
+  <div class="bar"><span class="ttl">Статистика</span><span class="st-flags" id="stFlags"></span></div>
+  <section class="card st-lvl" id="stLvl"></section>
+  <section class="card" id="stDay"></section>
+  <section class="card" id="stDni"></section>
+  <section class="card" id="stRezh"></section>
 </main>
 
 <!-- ⓘ — о программе: как пользоваться («Итог» убран 26.11.2026 — прогресс на сервере) -->
@@ -624,6 +658,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 <main id="words" class="hidden">
   <div class="bar"><span class="ttl">Слова</span></div>
   <div class="wstat"><b id="wN"></b><span class="muted" id="wTop"></span></div>
+  <div class="st-lvl" id="wLvl"></div>
   <div class="wleg"><span><i class="ok"></i>освоено</span><span><i class="seen"></i>встречалось в текстах</span><span><i></i>ещё нет</span></div>
   <p class="loading hidden" id="wLoad">Загружаю частотный список…</p>
   <div class="wgrid" id="wGrid"></div>

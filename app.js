@@ -132,7 +132,7 @@ function mark(i, c, mode) {  /* c — g/y/r; null — без цвета («вы�
   if (c) S.colors[P[i].id] = c; else delete S.colors[P[i].id];
   touch(M, S, P[i].id);
   logAdd(M, S, { p: P[i].id, c, m: mode });
-  save();
+  save(); paintWok();
 }
 
 /* --- звук: файл текста — из закрытого хранилища при первом открытии, дальше — из кэша устройства --- */
@@ -277,10 +277,11 @@ const squaresHtml = (c, n) => `<span class="sqs">${['g', 'y', 'r'].map(k => `<sp
 const tallyHtml = (c, n) => ['g', 'y', 'r'].map(k => `<span style="width:${c[k] / n * 100}%;background:var(--${k})"></span>`).join('');
 
 function show(id) {
+  vrTick();  /* время — тому экрану, что был */
   stop();
   if (id !== 'skor' && sk.back) { const b = sk.back; sk.back = null; if (M && M.blok) setText(b.id, true); }
   if (id !== 'nasluh') { nsStop(); NS.wasOn = false; nsDict(null); nsPopClose(); }
-  ['shelf', 'settings', 'about', 'nasluh', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo', 'fraza'].forEach(x => $(x).classList.toggle('hidden', x !== id));
+  ['shelf', 'settings', 'stat', 'about', 'nasluh', 'home', 'skor', 'bt', 'ves', 'check', 'words', 'slovar', 'soberi', 'sbgo', 'fraza'].forEach(x => $(x).classList.toggle('hidden', x !== id));
   window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
   /* на полке вместо домика — флаг изучаемого языка (нажатие — другой язык) */
   $('goHome').classList.toggle('hidden', id === 'shelf'); $('langFlag').classList.toggle('hidden', id !== 'shelf');
@@ -291,11 +292,48 @@ function show(id) {
   if (id === 'home') renderHome();
   if (id === 'settings') renderSettings();
   if (id === 'words') renderWords();
+  if (id === 'stat') { ST.lang = G.lang || 'el'; renderStat(); }
   if (id === 'fraza') renderFraza();
   if (id === 'nasluh') nsOpen();
   $('acctPop').classList.add('hidden');
+  vrTick();  /* сменился режим — кусок времени в журнал сразу */
 }
 const shown = id => !$(id).classList.contains('hidden');
+
+/* --- время занятий (docs/zamysel.md, «Статистика — решено 28 ноября 2026», решение 5): строка журнала kind = 'time' —
+   режим (mode), текст (text_id), активные секунды (sec). Активно — экран виден и было касание за последние 60 с или звучит
+   фраза; «На слух» — пока идёт (и на погасшем экране). Пишется кусками: при смене режима или текста, уходя со страницы
+   и раз в 5 минут. Список на устройстве — ekmafisi.vremya (и строки с других устройств, EK.onRemote). */
+const VKEY = 'ekmafisi.vremya';
+let VR = { cur: null, key: '', sec: 0, last: Date.now() }, lastTouch = Date.now();
+['pointerdown', 'keydown', 'wheel'].forEach(e => addEventListener(e, () => { lastTouch = Date.now(); }, { capture: true, passive: true }));
+function vrState() {  /* что идёт сейчас: { lang, m — режим, x — текст } или null */
+  if (shown('nasluh')) return NS.on ? { lang: NS.lang || G.lang || 'el', m: 'nasluh', x: null } : null;
+  if (document.visibilityState !== 'visible') return null;
+  if (Date.now() - lastTouch > 60000 && !(stopAt !== null && !paused) && !seqActive) return null;
+  if (shown('check')) return { lang: G.lang || 'el', m: 'check', x: null };
+  if (shown('sbgo')) return { lang: 'el', m: 'soberi', x: null };
+  const md = ['home', 'skor', 'bt', 'ves'].find(shown);
+  return md && M ? { lang: M.lang || 'el', m: md, x: M.id } : null;
+}
+function vrFlush() {
+  const c = VR.cur, s = Math.round(VR.sec); VR.sec = 0;
+  if (!c || s < 3) return;
+  const id = uuid(), at = now();
+  EK.queueLog({ id, at, kind: 'time', lang: c.lang, text_id: c.x, mode: c.m, sec: s });
+  const L = read(VKEY) || []; L.push({ id, t: at.slice(0, 16), lang: c.lang, m: c.m, x: c.x, s }); write(VKEY, L);
+}
+function vrTick() {  /* прошедшее с прошлого раза — тому, что шло; сменилось — кусок в журнал */
+  const t = Date.now();
+  if (VR.cur) VR.sec += Math.min(t - VR.last, 65000) / 1000;  /* спящая вкладка: не больше минуты за раз */
+  VR.last = t;
+  const c = vrState(), key = c ? c.lang + '|' + c.m + '|' + (c.x || '') : '';
+  if (key !== VR.key) { vrFlush(); VR.cur = c; VR.key = key; }
+  else if (VR.sec >= 300) vrFlush();
+}
+setInterval(vrTick, 5000);
+document.addEventListener('visibilitychange', () => { vrTick(); if (document.visibilityState === 'hidden') vrFlush(); });
+addEventListener('pagehide', () => { vrTick(); vrFlush(); });
 
 /* --- переходы: каждый экран и окно — шаг в истории браузера, системное «назад» и «←» идут на шаг выше:
    полка ← текст (#id) ← режим (#id-skor, #id-bt) ← окно слова (значения, происхождение, история) */
@@ -309,7 +347,7 @@ function goBack(fallback) {  /* открыто ссылкой прямо сюд�
   else { history.replaceState({ d: 0, sheet: null }, '', urlOf(fallback)); applyLoc(); }
 }
 function parseHash(h) {
-  if (['settings', 'about', 'nasluh', 'check', 'words', 'soberi', 'sbgo', 'fraza'].includes(h)) return { v: h };
+  if (['settings', 'stat', 'about', 'nasluh', 'check', 'words', 'soberi', 'sbgo', 'fraza'].includes(h)) return { v: h };
   if (h === 'slovar' || h.startsWith('slovar/')) {  /* #slovar/<лемма>[/tab|/etym] — статья, её таблицы или происхождение */
     const r = h.length > 7 ? decodeURIComponent(h.slice(7)) : null, m = r && r.match(/\/(tab|etym|hist)$/);
     return { v: 'slovar', l: m ? r.slice(0, -m[0].length) : r, m: m ? m[1] : null };
@@ -319,7 +357,7 @@ function parseHash(h) {
 }
 function applyLoc(force) {  /* force — первый вход: экран рисуется, даже если уже виден */
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
-  if (['shelf', 'settings', 'about', 'nasluh', 'words', 'fraza'].includes(t.v)) { if (force || !shown(t.v)) show(t.v); }
+  if (['shelf', 'settings', 'stat', 'about', 'nasluh', 'words', 'fraza'].includes(t.v)) { if (force || !shown(t.v)) show(t.v); }
   else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
   else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slvPokaz().show(t.l, t.m); }
   else if (t.v === 'soberi') { if (force || !shown('soberi')) soberiOpen(); }
@@ -393,9 +431,11 @@ $('txFold').onclick = () => {
 };
 /* число освоенных слов — в верхней строке рядом с темой, на всех экранах (26.11.2026; плитка «Слова» убрана) */
 function paintWok() {
-  const on = !!G.lang && (!!LIB.length), n = on ? wordStats().ok : 0;
+  const on = !!G.lang && (!!LIB.length), w = on ? wordStats() : null, n = w ? w.ok : 0, d = w ? wordsToday(G.lang, w) : 0;
   $('wOk').classList.toggle('hidden', !on);
-  $('wOk').textContent = n; $('wOk').setAttribute('aria-label', `Освоено ${n} ${plural(n, 'слово', 'слова', 'слов')}`);
+  /* «+N» — слова, вошедшие сегодня (до полуночи), по текущему языку */
+  $('wOk').innerHTML = n + (d ? `<span class="plus"> · +${d}</span>` : '');
+  $('wOk').setAttribute('aria-label', `Освоено ${n} ${plural(n, 'слово', 'слова', 'слов')}` + (d ? `, сегодня +${d}` : ''));
 }
 $('wOk').onclick = () => { if (!shown('words')) { push('words'); show('words'); } };
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
@@ -448,6 +488,8 @@ function renderSettings() {
   /* srazu=1: с 1.8 родная часть сверяется и ставит сразу, без своего экрана (ответ — всплывающей строкой); 1.7 и раньше — открывает экран обновления */
   $('setFraza').href = andrUrl('fraza'); $('setObn').href = andrUrl('fraza/obnovlenie?srazu=1');
   $('setVer').textContent = verTxt();
+  /* «Статистика ›» — справа ступень текущего языка */
+  if (G.lang && LIB.length) { const w = wordStats(), st = stupen(G.lang, w.ok); $('setStatSum').textContent = st.cur ? `${st.cur} · ${nf(w.ok)}` : `до ${st.next} · ${nf(w.ok)}`; }
   /* число статей словаря — простым текстом в конце экрана (Ваше слово 28.11.2026) */
   $('setSlv').textContent = window.Slovar && Slovar.opisanie ? Slovar.opisanie() : '';
   paintFlag();
@@ -1157,11 +1199,15 @@ function fsrsStep(c, g, t) {
   c.due = addDays(t, g === 1 ? 1 : Math.max(1, Math.round(c.s)));  /* удержание 0,9: интервал = стабильность */
 }
 /* карточки текста: { фраза: { s, d, last, due, reps } } — по журналу, «unlearn» снимает последнее «выучено», «unself» — последнее «трудно»/«не знаю» */
-function cardsOf(s) {
+const UNDO = { unlearn: 'learned', unself: 'self' };  /* снятая отметка в расчёт не идёт */
+function evOf(s) {  /* журнал по времени и номера снятых отметок */
   const ev = s.log.filter(x => x.p && x.t).slice().sort((a, b) => a.t.localeCompare(b.t));
   const drop = new Set();
-  const UNDO = { unlearn: 'learned', unself: 'self' };  /* снятая отметка в расчёт не идёт */
   ev.forEach((x, k) => { const u = UNDO[x.m]; if (u) { for (let j = k - 1; j >= 0; j--) if (ev[j].p === x.p && ev[j].m === u && !drop.has(j)) { drop.add(j); break; } } });
+  return { ev, drop };
+}
+function cardsOf(s) {
+  const { ev, drop } = evOf(s);
   const C = {};
   ev.forEach((x, k) => {
     if (drop.has(k) || UNDO[x.m]) return;
@@ -1174,31 +1220,79 @@ function cardsOf(s) {
   return C;
 }
 const stateOf = m => (M === m ? S : progOf(m));
-const langTexts = () => LIB.filter(m => m.lang === G.lang);
+const langTexts = (lang = G.lang) => LIB.filter(m => m.lang === lang);
 /* тексты и фразы с блокировки языка — для счётчика слов: освоенная фраза с блокировки отдаёт слова так же, как фраза текста */
-const langAll = () => [...langTexts(), ...BLOK.filter(b => b.lang === G.lang)];
+const langAll = (lang = G.lang) => [...langTexts(lang), ...BLOK.filter(b => b.lang === lang)];
 /* фразы, которым подошёл срок: сначала давние */
-function dueList() {
+function dueList(lang = G.lang) {
   const today = dayOf(Date.now()).getTime(), out = [];
-  langTexts().forEach(m => { const C = cardsOf(stateOf(m)); m.phrases.forEach((p, i) => { const c = C[p.id]; if (c && c.due && c.due <= today) out.push({ id: m.id, i, due: c.due }); }); });
+  langTexts(lang).forEach(m => { const C = cardsOf(stateOf(m)); m.phrases.forEach((p, i) => { const c = C[p.id]; if (c && c.due && c.due <= today) out.push({ id: m.id, i, due: c.due }); }); });
   out.sort((a, b) => a.due - b.due);
   /* фразы с блокировки — 10 % очереди (Ваше слово 27.11.2026), вперемежку: сначала подошедшие по сроку, потом новые
      по порядку тренировки (★, потом 🔊, потом вразброс) */
-  const b = blokOf(G.lang), k = Math.ceil(out.length * BLOK_DOLYA);
+  const b = blokOf(lang), k = Math.ceil(out.length * BLOK_DOLYA);
   if (!b || !k) return out;
   const add = blokOchered(b).slice(0, k).map(i => ({ id: b.id, i, due: 0 }));
   const step = out.length / add.length;
   add.forEach((x, j) => out.splice(Math.round(step * (j + 1)) + j, 0, x));
   return out;
 }
-/* освоенные фразы и слова: слово освоено, если оно есть в освоенной фразе */
-function wordStats() {
-  const ok = new Set(), seen = new Set();
-  langAll().forEach(m => {
-    const C = cardsOf(stateOf(m));
-    m.phrases.forEach(p => { const good = C[p.id] && C[p.id].s >= MASTER; (p.lem || p.words.map(w => w.l)).forEach(l => { if (!l) return; seen.add(l); if (good) ok.add(l); }); });
+/* --- счётчик «освоено» (docs/zamysel.md, «Статистика — решено 28 ноября 2026», пересмотр): фраза отдаёт слова сразу —
+   шапочкой «выучено» или зелёной сверкой письма (Обратный перевод; Проверка — та же сверка); выпадает — красной сверкой
+   или своей «не знаю». Жёлтая не трогает. «Собери» — шаг, пройденный зелёным без опоры (soberi-bez), отдаёт леммы шага
+   (it.blocks), красный снимает. Имена и названия не считаются. MASTER (21 день) — только для FSRS и очерёдности. */
+const VHOD = { bt: 1, 'bt-письмо': 1, 'bt-голос': 1, check: 1 };
+function osvOf(s) {  /* фраза → [[время, 1 — вошла | 0 — выпала], …] по журналу текста */
+  const { ev, drop } = evOf(s), R = {};
+  ev.forEach((x, k) => {
+    if (drop.has(k) || UNDO[x.m]) return;
+    const v = x.m === 'learned' ? 1 : VHOD[x.m] ? (x.c === 'g' ? 1 : x.c === 'r' ? 0 : null) : x.m === 'self' && x.c === 'r' ? 0 : null;
+    if (v !== null) (R[x.p] || (R[x.p] = [])).push([tOf(x), v]);
   });
-  return { ok: ok.size, okSet: ok, seen };
+  return R;
+}
+const osvNow = tl => !!tl && tl[tl.length - 1][1] === 1;
+/* имя или название: «имя» в словаре текста; без пометки — лемма с заглавной (I — не имя; у греческого заглавная — всегда) */
+const isName = (m, l) => { const pos = ((m.lexicon || {})[l] || {}).pos || ''; if (/^имя|собств/.test(pos)) return true; return l !== 'I' && l[0] !== l[0].toLowerCase() && (m.lang === 'el' || !pos); };
+/* «Собери»: отметки шагов — на этом устройстве (ekmafisi.soberi.log) и с сервера; леммы шага — из отметки или из цепочки */
+const SBLKEY = 'ekmafisi.soberi.log';
+const sbChain = id => (SBSTART || []).find(c => c.id === id) || (SBC.find(r => r.id === id) || {}).chain;
+function sbLem(x) {
+  if (x.lem) return x.lem;
+  const i = x.p.lastIndexOf(':'), c = sbChain(x.p.slice(0, i)), it = c && c.items.find(y => String(y.n) === x.p.slice(i + 1));
+  return it ? it.blocks || [] : [];
+}
+/* t — «на это время» (по умолчанию — сейчас): для «+N за сегодня» — на полночь */
+function wordStats(lang = G.lang, t = Infinity) {
+  const ok = new Set(), seen = new Set(), first = new Map(), ph = [];  /* first — лемма → когда впервые вошла; ph — входы фраз (для доли дошедших) */
+  const upTo = tl => tl && tl.filter(e => e[0] <= t);
+  const take = (lems, tl, m) => {
+    const a = upTo(tl), on = osvNow(a && a.length ? a : null), t0 = a && (a.find(e => e[1] === 1) || [])[0];
+    lems.forEach(l => {
+      if (!l || isName(m, l)) return;
+      seen.add(l); if (on) ok.add(l);
+      if (t0 && (!first.has(l) || first.get(l) > t0)) first.set(l, t0);
+    });
+  };
+  langAll(lang).forEach(m => {
+    const s = stateOf(m), R = osvOf(s);
+    m.phrases.forEach(p => { take(p.lem || p.words.map(w => w.l), R[p.id], m); if (R[p.id]) ph.push({ s, p: p.id, tl: R[p.id] }); });
+  });
+  if (lang === 'el') {
+    const R = {}, L = {};
+    (read(SBLKEY) || []).forEach(x => {
+      const v = x.c === 'r' ? 0 : x.c === 'g' && x.m === 'soberi-bez' ? 1 : null; if (v === null) return;
+      (R[x.p] || (R[x.p] = [])).push([tOf(x), v]); if (!L[x.p] || (!L[x.p].lem && x.lem)) L[x.p] = x;
+    });
+    Object.keys(R).forEach(pid => { R[pid].sort((a, b) => a[0] - b[0]); if (R[pid].some(e => e[1])) take(sbLem(L[pid]), R[pid], { lang: 'el' }); });
+  }
+  return { ok: ok.size, okSet: ok, seen, first, ph };
+}
+/* «+N» — слова, вошедшие в счётчик сегодня (их не было на полночь) */
+function wordsToday(lang = G.lang, w = wordStats(lang)) {
+  const mid = wordStats(lang, dayOf(Date.now()).getTime() - 1).okSet;
+  let n = 0; w.okSet.forEach(l => { if (!mid.has(l)) n++; });
+  return n;
 }
 
 /* --- Фразы с экрана блокировки в тренировке (Ваше слово 27.11.2026) ---
@@ -1312,12 +1406,12 @@ const FRS = 'ekmafisi-fraza-novye';  /* порядок: старые сверх�
 function renderFraza() {
   const novye = (() => { try { return localStorage.getItem(FRS) === '1'; } catch (e) { return false; } })();
   const rows = IST.filter(r => (r.lang || 'el') === (G.lang || 'el')).slice().sort((a, b) => String(a.poslednij).localeCompare(String(b.poslednij)) * (novye ? -1 : 1));
-  const b = blokOf(G.lang), st = b ? stateOf(b) : null, C = st ? cardsOf(st) : {};
+  const b = blokOf(G.lang), st = b ? stateOf(b) : null, C = st ? cardsOf(st) : {}, O = st ? osvOf(st) : {};
   $('frN').textContent = `Фразы · ${rows.length}`;
   $('frSort').textContent = (novye ? 'новые сверху' : 'старые сверху') + ' ⇅';
   const dt = t => t ? new Date(t).toLocaleString('ru-RU', { day: 'numeric', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', '') : '';
   $('frList').innerHTML = rows.length ? rows.map(r => {
-    const c = C['b' + r.id], sost = !c ? '' : c.s >= MASTER ? ' · освоена' : ' · в тренировке';
+    const c = C['b' + r.id], sost = osvNow(O['b' + r.id]) ? ' · освоена' : c ? ' · в тренировке' : '';
     return `<div class="fr-row"><div class="fr-f el">${r.zvezda ? '<span class="fr-star" aria-label="со звёздочкой">★</span> ' : ''}${esc(r.f)}</div><div>${esc(r.ru)}</div>
       <div class="small muted">${{ el: '🇬🇷', en: '🇬🇧' }[r.lang] || ''} · ${dt(r.poslednij)}${r.pokazov > 1 ? ` · показана ${r.pokazov} ${plural(r.pokazov, 'раз', 'раза', 'раз')}` : ''}${r.zvukov ? ` · 🔊 ${r.zvukov}` : ''}${sost}</div></div>`;
   }).join('') : `<p class="muted">Пока пусто. Фразы приходят с телефона: Android-приложение Экмафиси, «Фраза на экране блокировки» — после первого открытия плитки «Фразы на блокировке» на телефоне.</p>`;
@@ -1389,6 +1483,7 @@ function renderWords() {
   const w = wordStats(), lang = G.lang || 'el';
   langTexts().forEach(loadLex);  /* значения и происхождение — из словарей всех текстов языка */
   $('wN').textContent = `Освоено ${w.ok} ${plural(w.ok, 'слово', 'слова', 'слов')}`;
+  $('wLvl').innerHTML = lvlHtml(lang, w);  /* та же полоса ступени, что во вкладке «Статистика» */
   const draw = list => {
     const top = list.slice(0, 1000), okTop = top.filter(x => w.okSet.has(x.lemma)).length;
     $('wTop').textContent = `из первой тысячи — ${Math.round(okTop / 10)} %` + (okTop && okTop < 10 ? ` (${okTop})` : '');
@@ -1399,6 +1494,113 @@ function renderWords() {
   EK.content(lang + '/chastoty.json', navigator.onLine).then(r => r.json()).then(d => { FREQ[lang] = d.lemmas; $('wLoad').classList.add('hidden'); if (shown('words')) draw(d.lemmas); })
     .catch(() => { $('wLoad').textContent = 'Частотного списка для этого языка пока нет.'; });
 }
+/* --- «Статистика» (docs/zamysel.md, «Статистика — решено 28 ноября 2026» с пересмотром): по каждому языку отдельно ---
+   Ступени — размер словаря по Milton & Alexiou (X-Lex), «словарь уровня A2» на нижней границе полосы уровня. */
+const STUPENI = { en: [500, 1500, 2750, 3250, 3750, 4500], el: [750, 1850, 2750, 3600, 4150, 5000] }, CEFR = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+function stupen(lang, ok) {  /* cur — достигнутая (или null), next и thr — следующая и её порог (null — все пройдены) */
+  const T = STUPENI[lang] || STUPENI.el; let i = 0;
+  while (i < T.length && ok >= T[i]) i++;
+  return { cur: i ? CEFR[i - 1] : null, next: i < T.length ? CEFR[i] : null, thr: i < T.length ? T[i] : null };
+}
+const nf = n => Math.round(n).toLocaleString('ru-RU');
+const fmtMin = s => { const m = Math.round(s / 60); return m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч${m % 60 ? ' ' + (m % 60) + ' мин' : ''}`; };
+/* минуты по дням: день (полночь, мс) → { all, m: { режим: секунды } }. Время из журнала (kind time); до первой его записи
+   по языку — оценка по промежуткам отметок: промежуток короче 5 мин — целиком, начало занятия — 1 мин */
+const MODE_KEY = { povt: 'skor', skor: 'skor', bt: 'bt', 'bt-письмо': 'bt', 'bt-голос': 'bt', check: 'check', soberi: 'soberi', 'soberi-bez': 'soberi', 'soberi-flag': 'soberi' };
+function minutyDni(lang) {
+  const D = new Map(), add = (t, m, s) => { const d = dayOf(t).getTime(); let o = D.get(d); if (!o) D.set(d, o = { all: 0, m: {} }); o.all += s; o.m[m] = (o.m[m] || 0) + s; };
+  const V = (read(VKEY) || []).filter(x => x.lang === lang && x.s > 0);
+  const cut = V.reduce((a, x) => Math.min(a, tOf(x) - x.s * 1000), Infinity);
+  V.forEach(x => add(tOf(x), x.m, x.s));
+  const ev = [];
+  langAll(lang).forEach(m => stateOf(m).log.forEach(x => { if (x.t && x.m) ev.push([tOf(x), x.m]); }));
+  if (lang === 'el') (read(SBLKEY) || []).forEach(x => x.t && ev.push([tOf(x), x.m]));
+  ev.sort((a, b) => a[0] - b[0]);
+  let prev = null, pm = 'home';
+  ev.forEach(([t, m]) => {
+    if (t >= cut) return;
+    const near = prev !== null && t - prev < 300000 && dayOf(t).getTime() === dayOf(prev).getTime();
+    const k = MODE_KEY[m] || (near ? pm : 'home');  /* шапочка, «трудно» — тому режиму, где нажаты; без него — списку фраз */
+    add(t, k, near ? (t - prev) / 1000 : 60);
+    prev = t; pm = k;
+  });
+  return D;
+}
+/* прогноз (пересмотр решения 4): темп v — новые слова счётчика за 28 дней на минуту занятий; k — доля фраз, переживших
+   первую «Проверку» после входа (пока таких меньше 20 — 0,8); срок = остаток / (v · k · минут в день), до месяца */
+function prognozDannye(lang, w, D) {
+  const from = addDays(Date.now(), -27);
+  let sec = 0, dni = 0; D.forEach((o, d) => { if (d >= from) { sec += o.all; if (o.all >= 60) dni++; } });
+  let nw = 0; w.first.forEach(t => { if (t >= from) nw++; });
+  let all = 0, surv = 0;
+  w.ph.forEach(({ s, p, tl }) => {
+    const t0 = (tl.find(e => e[1] === 1) || [])[0]; if (!t0) return;
+    const c = s.log.find(x => x.p === p && x.m === 'check' && x.c && tOf(x) > t0); if (!c) return;
+    all++; if (c.c !== 'r') surv++;
+  });
+  const min = sec / 60;
+  return { min, dni, avg: min / 28, v: min ? nw / min : 0, k: all >= 20 ? Math.max(0.3, surv / all) : 0.8 };
+}
+const MES = ['январе', 'феврале', 'марте', 'апреле', 'мае', 'июне', 'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре'];
+function prognozTxt(lang, w, pd, mpd) {
+  const st = stupen(lang, w.ok); if (!st.next) return '';
+  if (pd.dni < 7) return `${st.next} — прогноз после недели занятий`;
+  if (!pd.v) return `${st.next} — прогноз, когда в счётчик войдут новые слова`;
+  const days = (st.thr - w.ok) / (pd.v * pd.k * mpd);
+  if (days > 365 * 5) return `${st.next} — больше чем через 5 лет при ${mpd} мин в день`;
+  const d = new Date(Date.now() + days * DAY), n = new Date();
+  const kog = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() ? 'в этом месяце' : `в ${MES[d.getMonth()]}${d.getFullYear() !== n.getFullYear() ? ' ' + d.getFullYear() : ''}`;
+  return `${st.next} — ≈ ${kog} при ${mpd} мин в день`;
+}
+/* ступень: «Словарь уровня A1 · 600 из 1 500» (ниже A1 — «до A1 · 263 из 500») и полоса до следующей ступени */
+function lvlHtml(lang, w) {
+  const st = stupen(lang, w.ok);
+  const head = st.cur ? `Словарь уровня ${st.cur}` : `До ${st.next}`;
+  const of = st.thr ? `${nf(w.ok)} из ${nf(st.thr)}` : nf(w.ok);
+  return `<div class="st-h"><b>${head}</b><span>${of}</span></div><div class="lvbar" role="img" aria-label="${esc(head + ': ' + of)}"><span style="width:${st.thr ? Math.min(100, w.ok / st.thr * 100) : 100}%"></span></div>`;
+}
+const MPD = [5, 10, 15, 20, 30];
+let ST = { lang: 'el', mpd: {} };
+const langActive = lang => minutyDni(lang).size > 0;
+function renderStat() {
+  const lang = ST.lang, w = wordStats(lang), D = minutyDni(lang), pd = prognozDannye(lang, w, D);
+  /* флаги — только если занимались на обоих языках; нажатие переключает вкладку целиком */
+  const both = Object.keys(LANGS).filter(l => l === lang || langActive(l));
+  $('stFlags').innerHTML = both.length > 1 ? both.map(l => `<button class="sflag" data-st="${l}" aria-pressed="${l === lang}" aria-label="${esc(LANGS[l].name)}">${FLAG[l]}</button>`).join('') : '';
+  $('stFlags').querySelectorAll('[data-st]').forEach(b => b.onclick = () => { ST.lang = b.dataset.st; renderStat(); });
+  /* 1. ступень и прогноз; минуты в день — по умолчанию ближайшее к среднему за 28 дней */
+  const near = MPD.reduce((a, x) => Math.abs(x - pd.avg) < Math.abs(a - pd.avg) ? x : a, MPD[0]);
+  const mpd = ST.mpd[lang] || near, st = stupen(lang, w.ok), avgR = Math.round(pd.avg);
+  $('stLvl').innerHTML = lvlHtml(lang, w) + (st.next ? `<p class="st-prog" id="stProg">${esc(prognozTxt(lang, w, pd, mpd))}</p>
+    ${pd.dni >= 7 && pd.v ? `<div class="seg st-mpd" role="group" aria-label="Минут в день">${MPD.map(x => `<button data-mpd="${x}" aria-pressed="${x === mpd}">${x}</button>`).join('')}</div>
+    <p class="small muted">минут в день; сейчас в среднем ${avgR < 1 ? 'меньше минуты' : avgR + ' мин'}</p>` : ''}` : '<p class="st-prog">Все ступени пройдены</p>');
+  $('stLvl').querySelectorAll('[data-mpd]').forEach(b => b.onclick = () => { ST.mpd[lang] = +b.dataset.mpd; renderStat(); });
+  /* 2. сегодня: минуты всегда, «+N слов» и «повторено M фраз» — если больше нуля */
+  const today = dayOf(Date.now()).getTime(), plus = wordsToday(lang, w), rep = new Set();
+  langAll(lang).forEach(m => { const s = stateOf(m), before = new Set(); s.log.forEach(x => { if (!x.p || !x.t || UNDO[x.m] || x.m === 'learned') return; if (tOf(x) < today) before.add(x.p); else if (before.has(x.p)) rep.add(m.id + '/' + x.p); }); });
+  $('stDay').innerHTML = `<h2>Сегодня</h2><p class="st-big">${[fmtMin((D.get(today) || { all: 0 }).all), plus && `+${nf(plus)} ${plural(plus, 'слово', 'слова', 'слов')}`, rep.size && `повторено ${nf(rep.size)} ${plural(rep.size, 'фраза', 'фразы', 'фраз')}`].filter(Boolean).join(' · ')}</p>`;
+  /* 3. по дням: столбики минут за 28 дней, под ними — за неделю */
+  const days = [...Array(28)].map((_, j) => addDays(today, j - 27)), sec = days.map(d => (D.get(d) || { all: 0 }).all), mx = Math.max(60, ...sec);
+  const wk = sec.slice(-7).reduce((a, x) => a + x, 0);
+  const dm = d => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }).replace('.', '');
+  $('stDni').innerHTML = `<div class="st-h"><h2>По дням</h2><span class="small muted">за неделю ${fmtMin(wk)}</span></div>
+    <div class="st-dni" aria-hidden="true">${sec.map((s, j) => `<i class="${s < 30 ? 'z' : ''}" style="height:${s < 30 ? 2 : Math.max(6, s / mx * 100)}%" title="${dm(days[j])}: ${fmtMin(s)}"></i>`).join('')}</div>
+    <div class="st-dax small muted"><span>${dm(days[0])}</span><span>сегодня</span></div>`;
+  /* 4. по режимам: минуты за 28 дней и своё число; без минут — не показываются */
+  const from = addDays(today, -27), per = {}, cnt = { povt: new Set(), bt: new Set() };
+  D.forEach((o, d) => { if (d >= from) Object.keys(o.m).forEach(k => { per[k] = (per[k] || 0) + o.m[k]; }); });
+  langAll(lang).forEach(m => stateOf(m).log.forEach(x => { if (!x.t || tOf(x) < from) return; if (x.m === 'povt' || x.m === 'skor') cnt.povt.add(m.id + '/' + x.p); if (VHOD[x.m] && x.m !== 'check' && x.c) cnt.bt.add(m.id + '/' + x.p); }));
+  const fr = n => `${nf(n)} ${plural(n, 'фраза', 'фразы', 'фраз')}`, due = dueList(lang).length;
+  const R = [
+    ['skor', 'Повторение', `пройдено ${fr(cnt.povt.size)}`], ['bt', 'Обратный перевод', `проверено ${fr(cnt.bt.size)}`],
+    ['check', 'Проверка', due ? `ждёт сегодня ${nf(due)}` : 'сегодня всё'], ['soberi', 'Собери', `ступень ${SB.step}`],
+    ['nasluh', 'На слух', ''], ['ves', 'Весь текст', ''], ['home', 'Список фраз', '']
+  ].filter(r => (per[r[0]] || 0) >= 30);
+  $('stRezh').classList.toggle('hidden', !R.length);
+  $('stRezh').innerHTML = `<div class="st-h"><h2>По режимам</h2><span class="small muted">28 дней</span></div>` + R.map(([k, n, x]) => `<div class="st-row"><span>${n}</span><span class="muted">${fmtMin(per[k])}${x ? ' · ' + x : ''}</span></div>`).join('');
+}
+$('setStat').onclick = e => { e.preventDefault(); if (!shown('stat')) { push('stat'); show('stat'); } };
+
 const POS_RU = { NOUN: 'существительное', VERB: 'глагол', ADJ: 'прилагательное', ADV: 'наречие', PRON: 'местоимение', DET: 'артикль, определитель', ADP: 'предлог', CCONJ: 'союз', SCONJ: 'союз', NUM: 'числительное', PART: 'частица', INTJ: 'междометие', AUX: 'вспомогательный глагол', PROPN: 'имя собственное' };
 function renderWord(l) {
   const x = (FREQ[G.lang || 'el'] || []).find(y => y.lemma === l) || { lemma: l };
@@ -1488,13 +1690,14 @@ async function sbGo(step) {
   }
   sbRefill(step);
   const flagged = SB.flags[chain.id] || {};
-  go = { chain, step, q: chain.items.map((_, k) => k).filter(k => !flagged[chain.items[k].n]), k: 0, tries: 0, res: null, grades: {}, again: new Set() };
+  go = { chain, step, q: chain.items.map((_, k) => k).filter(k => !flagged[chain.items[k].n]), k: 0, tries: 0, res: null, grades: {}, again: new Set(), opora: new Set() };
   goRender();
 }
 function goRender() {
   const it = go.chain.items[go.q[go.k]];
   $('gCnt').textContent = `${go.k + 1} / ${go.q.length}`;
   $('gRu').textContent = it.ru;
+  if (SB.opora) go.opora.add(go.q[go.k]);  /* опору видели — шаг уже не «без опоры» */
   $('gBlocks').innerHTML = SB.opora ? shuffle(it.blocks || []).map(b => `<span>${esc(b)}</span>`).join('') : '';
   $('gBlocks').classList.toggle('hidden', !SB.opora);
   $('gOpora').textContent = SB.opora ? 'без опоры' : 'показать опору';
@@ -1626,9 +1829,13 @@ $('gCheck').onclick = () => {
 function sbMark(k, c, a) {
   if (go.grades[k]) return;  /* повтор «не знаю» в конце цепочки оценку не меняет */
   go.grades[k] = c;
-  const pid = go.chain.id + ':' + go.chain.items[k].n, at = now(), id = uuid();
+  const it = go.chain.items[k], pid = go.chain.id + ':' + it.n, at = now(), id = uuid();
+  /* без опоры (опора на этом шаге ни разу не показывалась) — soberi-bez: зелёный отдаёт леммы шага в счётчик освоенных */
+  const mode = go.opora.has(k) ? 'soberi' : 'soberi-bez';
   EK.queueProgress({ lang: 'el', text_id: 'soberi', phrase_id: pid, cut: 1, color: c, written: a || null, updated_at: at });
-  EK.queueLog({ id, at, kind: 'mark', lang: 'el', text_id: 'soberi', phrase_id: pid, mode: 'soberi', color: c });
+  EK.queueLog({ id, at, kind: 'mark', lang: 'el', text_id: 'soberi', phrase_id: pid, mode, color: c });
+  const L = read(SBLKEY) || []; L.push({ id, p: pid, c, m: mode, t: at.slice(0, 16), lem: it.blocks || [] }); write(SBLKEY, L);
+  paintWok();
 }
 $('gAgain').onclick = () => {
   stop(); speechSynthesis.cancel();
@@ -2108,8 +2315,13 @@ EK.onRemote = ({ progress, log, settings }) => {
   });
   const elog = read(EKEY) || [], eseen = new Set(elog.map(x => x.id).filter(Boolean));
   let eadd = false;
+  const vlog = read(VKEY) || [], vseen = new Set(vlog.map(x => x.id)), slog = read(SBLKEY) || [], sseen = new Set(slog.map(x => x.id));
+  let vadd = false, sadd = false;
   log.forEach(r => {
     if (r.kind === 'etym') { if (!eseen.has(r.id)) { elog.push({ id: r.id, l: r.lemma, t: r.at.slice(0, 16) }); eadd = true; } return; }
+    /* время занятий и отметки «Собери» — свои списки на устройстве (статистика, счётчик) */
+    if (r.kind === 'time') { if (!vseen.has(r.id) && r.sec > 0) { vlog.push({ id: r.id, t: r.at.slice(0, 16), lang: r.lang || 'el', m: r.mode, x: r.text_id || null, s: r.sec }); vadd = true; } return; }
+    if (r.kind === 'mark' && r.text_id === 'soberi') { if (!sseen.has(r.id)) { slog.push({ id: r.id, p: r.phrase_id, c: r.color, m: r.mode, t: r.at.slice(0, 16) }); sadd = true; } return; }
     const m = byId[r.text_id]; if (!m) return;
     const s = progFor(r.text_id);
     if (r.kind === 'reset') {  /* сброс на другом устройстве: всё, что раньше него, — вон */
@@ -2123,6 +2335,8 @@ EK.onRemote = ({ progress, log, settings }) => {
     s.log.push({ id: r.id, p: r.phrase_id, c: r.color, m: r.mode, t: r.at.slice(0, 16) });
   });
   if (eadd) { elog.sort((a, b) => a.t.localeCompare(b.t)); write(EKEY, elog); }
+  if (vadd) { vlog.sort((a, b) => a.t.localeCompare(b.t)); write(VKEY, vlog); }
+  if (sadd) { slog.sort((a, b) => a.t.localeCompare(b.t)); write(SBLKEY, slog); }
   const T = read(TKEY) || {};
   Object.keys(settings).forEach(k => {
     const r = settings[k]; if (!r || (T[k] && T[k].t >= r.t)) return;
@@ -2137,9 +2351,10 @@ EK.onRemote = ({ progress, log, settings }) => {
   write(TKEY, T); write(SKEY, G);
   Object.keys(touched).forEach(id => { touched[id].log.sort((a, b) => a.t.localeCompare(b.t)); writeProg(byId[id], touched[id]); });
   /* перерисовать то, что видно и не мешает занятию: полку и экран текста */
-  paintTheme(); paintSpeed();
+  paintTheme(); paintSpeed(); paintWok();
   if (shown('shelf')) renderShelf();
   else if (shown('home')) renderHome();
+  else if (shown('stat')) renderStat();
 };
 
 /* --- кто вошёл и состояние отправки --- */
