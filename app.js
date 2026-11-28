@@ -285,8 +285,6 @@ function show(id) {
   window.scrollTo(0, 0); topY = 0; $('top').classList.remove('away');
   /* на полке вместо домика — флаг изучаемого языка (нажатие — другой язык) */
   $('goHome').classList.toggle('hidden', id === 'shelf'); $('langFlag').classList.toggle('hidden', id !== 'shelf');
-  /* ⓘ и учётная запись — только на экране настроек (26.11.2026) */
-  $('aboutOpen').classList.toggle('hidden', id !== 'settings'); $('acctOpen').parentNode.classList.toggle('hidden', id !== 'settings');
   paintWok();
   if (id === 'shelf') renderShelf();
   if (id === 'home') renderHome();
@@ -295,7 +293,6 @@ function show(id) {
   if (id === 'stat') { ST.lang = G.lang || 'el'; renderStat(); }
   if (id === 'fraza') renderFraza();
   if (id === 'nasluh') nsOpen();
-  $('acctPop').classList.add('hidden');
   vrTick();  /* сменился режим — кусок времени в журнал сразу */
 }
 const shown = id => !$(id).classList.contains('hidden');
@@ -542,11 +539,9 @@ document.querySelectorAll('.rng .val').forEach(b => b.onclick = () => {
   closePops(r); b.setAttribute('aria-expanded', String(open));
 });
 document.addEventListener('click', e => { if (!e.target.closest('.rng')) closePops(); });
-/* ⓘ — о программе (как пользоваться, итог) */
-$('aboutOpen').onclick = () => { if (!shown('about')) { push('about'); show('about'); } };
+/* «О программе» — строкой в настройках (с 28.11.2026; до того значок ⓘ вверху) */
+$('aboutOpen').onclick = e => { e.preventDefault(); if (!shown('about')) { push('about'); show('about'); } };
 /* значок учётной записи: адрес и «Выйти» (или «Войти через Google») — окошком под значком */
-$('acctOpen').onclick = e => { e.stopPropagation(); const h = !$('acctPop').classList.toggle('hidden'); $('acctOpen').setAttribute('aria-expanded', String(h)); };
-document.addEventListener('click', e => { if (!e.target.closest('.acct')) { $('acctPop').classList.add('hidden'); $('acctOpen').setAttribute('aria-expanded', 'false'); } });
 
 function setText(id, quiet) {  /* quiet — для «Проверки»: текст нужен, последний текст полки не трогаем */
   const m = findMat(id);
@@ -1483,7 +1478,9 @@ function renderWords() {
   const w = wordStats(), lang = G.lang || 'el';
   langTexts().forEach(loadLex);  /* значения и происхождение — из словарей всех текстов языка */
   $('wN').textContent = `Освоено ${w.ok} ${plural(w.ok, 'слово', 'слова', 'слов')}`;
-  $('wLvl').innerHTML = lvlHtml(lang, w);  /* та же полоса ступени, что во вкладке «Статистика» */
+  /* та же полоса ступени, что во вкладке «Статистика», и прогноз при минутах, выбранных там (Ваше слово 28.11.2026) */
+  const pd = prognozDannye(lang, w, minutyDni(lang)), pt = prognozTxt(lang, w, pd, mpdOf(lang, pd));
+  $('wLvl').innerHTML = lvlHtml(lang, w) + (pt ? `<p class="st-prog">${esc(pt)}</p>` : '');
   const draw = list => {
     const top = list.slice(0, 1000), okTop = top.filter(x => w.okSet.has(x.lemma)).length;
     $('wTop').textContent = `из первой тысячи — ${Math.round(okTop / 10)} %` + (okTop && okTop < 10 ? ` (${okTop})` : '');
@@ -1557,10 +1554,16 @@ function lvlHtml(lang, w) {
   const st = stupen(lang, w.ok);
   const head = st.cur ? `Словарь уровня ${st.cur}` : `До ${st.next}`;
   const of = st.thr ? `${nf(w.ok)} из ${nf(st.thr)}` : nf(w.ok);
-  return `<div class="st-h"><b>${head}</b><span>${of}</span></div><div class="lvbar" role="img" aria-label="${esc(head + ': ' + of)}"><span style="width:${st.thr ? Math.min(100, w.ok / st.thr * 100) : 100}%"></span></div>`;
+  /* «Встречалось в текстах — 294 (39 % из A1)» (Ваше слово 28.11.2026): доля — от ступени, до которой встреченных ещё не хватает */
+  const n = w.seen.size, sv = stupen(lang, n);
+  const seen = n ? `<p class="small muted st-seen">Встречалось в текстах — ${nf(n)}${sv.thr ? ` (${Math.round(n / sv.thr * 100)} % из ${sv.next})` : ''}</p>` : '';
+  return `<div class="st-h"><b>${head}</b><span>${of}</span></div><div class="lvbar" role="img" aria-label="${esc(head + ': ' + of)}"><span style="width:${st.thr ? Math.min(100, w.ok / st.thr * 100) : 100}%"></span></div>${seen}`;
 }
 const MPD = [5, 10, 15, 20, 30];
-let ST = { lang: 'el', mpd: {} };
+let ST = { lang: 'el' };
+/* минут в день для прогноза — выбор во вкладке «Статистика», по языку, на этом устройстве; не выбрано — ближайшее к среднему за 28 дней */
+const MKEY = 'ekmafisi.stat.minut';
+const mpdOf = (lang, pd) => (read(MKEY) || {})[lang] || MPD.reduce((a, x) => Math.abs(x - pd.avg) < Math.abs(a - pd.avg) ? x : a, MPD[0]);
 const langActive = lang => minutyDni(lang).size > 0;
 function renderStat() {
   const lang = ST.lang, w = wordStats(lang), D = minutyDni(lang), pd = prognozDannye(lang, w, D);
@@ -1569,12 +1572,11 @@ function renderStat() {
   $('stFlags').innerHTML = both.length > 1 ? both.map(l => `<button class="sflag" data-st="${l}" aria-pressed="${l === lang}" aria-label="${esc(LANGS[l].name)}">${FLAG[l]}</button>`).join('') : '';
   $('stFlags').querySelectorAll('[data-st]').forEach(b => b.onclick = () => { ST.lang = b.dataset.st; renderStat(); });
   /* 1. ступень и прогноз; минуты в день — по умолчанию ближайшее к среднему за 28 дней */
-  const near = MPD.reduce((a, x) => Math.abs(x - pd.avg) < Math.abs(a - pd.avg) ? x : a, MPD[0]);
-  const mpd = ST.mpd[lang] || near, st = stupen(lang, w.ok), avgR = Math.round(pd.avg);
+  const mpd = mpdOf(lang, pd), st = stupen(lang, w.ok), avgR = Math.round(pd.avg);
   $('stLvl').innerHTML = lvlHtml(lang, w) + (st.next ? `<p class="st-prog" id="stProg">${esc(prognozTxt(lang, w, pd, mpd))}</p>
     ${pd.dni >= 7 && pd.v ? `<div class="seg st-mpd" role="group" aria-label="Минут в день">${MPD.map(x => `<button data-mpd="${x}" aria-pressed="${x === mpd}">${x}</button>`).join('')}</div>
     <p class="small muted">минут в день; сейчас в среднем ${avgR < 1 ? 'меньше минуты' : avgR + ' мин'}</p>` : ''}` : '<p class="st-prog">Все ступени пройдены</p>');
-  $('stLvl').querySelectorAll('[data-mpd]').forEach(b => b.onclick = () => { ST.mpd[lang] = +b.dataset.mpd; renderStat(); });
+  $('stLvl').querySelectorAll('[data-mpd]').forEach(b => b.onclick = () => { write(MKEY, Object.assign(read(MKEY) || {}, { [lang]: +b.dataset.mpd })); renderStat(); });
   /* 2. сегодня: минуты всегда, «+N слов» и «повторено M фраз» — если больше нуля */
   const today = dayOf(Date.now()).getTime(), plus = wordsToday(lang, w), rep = new Set();
   langAll(lang).forEach(m => { const s = stateOf(m), before = new Set(); s.log.forEach(x => { if (!x.p || !x.t || UNDO[x.m] || x.m === 'learned') return; if (tOf(x) < today) before.add(x.p); else if (before.has(x.p)) rep.add(m.id + '/' + x.p); }); });
@@ -2359,7 +2361,7 @@ EK.onRemote = ({ progress, log, settings }) => {
 
 /* --- кто вошёл и состояние отправки --- */
 const SYNC_LBL = { synced: () => 'сохранено на сервере', pending: () => 'ждёт отправки', offline: () => 'без сети — хранится здесь', error: () => 'не отправилось — повторю' };
-EK.onStatus = st => { $('acctSync').textContent = EK.guest ? 'прогресс хранится только на этом устройстве' : SYNC_LBL[st] ? '· ' + SYNC_LBL[st]() : ''; };
+EK.onStatus = st => { $('acctSync').textContent = EK.guest ? 'прогресс хранится только на этом устройстве' : SYNC_LBL[st] ? cap(SYNC_LBL[st]()) : ''; };
 /* гость: не входил — «Войти через Google»; вошёл, но адреса нет в списке — адрес и «Выйти» */
 $('acctWho').textContent = !EK.guest ? EK.email || '' : EK.email ? `${EK.email} — адреса нет в списке своих` : 'Без входа';
 $('signOut').textContent = EK.guest && !EK.email ? 'Войти через Google' : 'Выйти';

@@ -84,6 +84,10 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .howto-txt { display: grid; gap: 8px; font-size: calc(15px + var(--up)); }
 .howto-txt ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 /* учётная запись: значок в верхней строке, по нажатию — адрес и «Выйти» (или «Войти через Google») */
+.set-acct { gap: 8px; }
+.set-acct p { margin: 0; overflow-wrap: anywhere; }
+.set-acct .btn { min-height: 40px; padding: 8px 14px; justify-self: start; margin-top: 4px; }
+.set-acct .err:empty, .set-acct .muted:empty { display: none; }
 .acct { position: relative; display: inline-flex; }
 .acct-pop { position: absolute; right: 0; top: 46px; z-index: 6; min-width: 240px; max-width: calc(100vw - 32px); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.16); overflow-wrap: anywhere; }
 .acct-pop .btn { min-height: 40px; padding: 8px 14px; justify-self: start; }
@@ -411,6 +415,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 .lvbar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
 .lvbar span { display: block; height: 100%; background: var(--g); border-radius: 5px; }
 .st-prog { margin: 0; font-weight: 600; }
+.st-seen { margin: -4px 0 0; }
 .st-lvl .small { margin: -4px 0 0; }
 .st-mpd { display: flex; } .st-mpd button { flex: 1; }
 .st-big { margin: 0; font-size: calc(18px + var(--up)); font-variant-numeric: tabular-nums; }
@@ -430,9 +435,6 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
   <button class="icon flag hidden" id="langFlag" aria-label="Язык"></button>
   <button class="icon" id="goHome" aria-label="На полку"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h5v-6h4v6h5V9"/></svg></button>
   <span class="sp"></span>
-  <button class="icon" id="aboutOpen" aria-label="О программе"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r=".6" fill="currentColor"/></svg></button>
-  <span class="acct"><button class="icon" id="acctOpen" aria-label="Учётная запись" aria-expanded="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button>
-    <div class="acct-pop hidden" id="acctPop"><p id="acctWho"></p><p class="small muted" id="acctSync"></p><button class="btn" id="signOut">Выйти</button><p class="err" id="signInErr"></p></div></span>
   <button class="wok hidden" id="wOk" aria-label="Освоено слов"></button>
   <button class="icon" id="theme" aria-label="Тема"></button>
   <button class="icon" id="setOpen" aria-label="Настройки"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -475,7 +477,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 </main>
 
 <main id="settings" class="hidden">
-  <!-- всё на одном экране, строкой «название — выбор» (Ваше слово 26.11.2026); «Как пользоваться» — в окне ⓘ; ⓘ и учётная запись — значками в верхней строке, только на этом экране -->
+  <!-- всё на одном экране, строкой «название — выбор» (Ваше слово 26.11.2026); «О программе» и учётная запись — своими блоками ниже (28.11.2026) -->
   <section class="card set">
     <a class="srow go" id="setStat" href="#stat"><span>Статистика</span><span class="st-sum"><span class="muted" id="setStatSum"></span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span></a>
     <div class="srow"><span>Язык изучения</span><button class="sflag" id="setLang"></button></div>
@@ -484,6 +486,13 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
     <div class="srow"><span>Обратный перевод — кол-во фраз</span><span class="rng"><button class="val" id="setBtNV" aria-expanded="false" aria-label="Обратный перевод — фраз за раз"></button><span class="pop hidden"><input type="range" id="setBtN" min="1" max="3" step="1" aria-label="Обратный перевод — фраз за раз"></span></span></div>
     <a class="srow go hidden" id="setFraza" href="intent://fraza#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Фраза на экране блокировки</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a>
     <div class="srow obn hidden" id="setObnRow"><a class="btn wide" id="setObn" href="intent://fraza/obnovlenie?srazu=1#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end">Обновить программу</a><p class="small muted" id="setVer"></p></div>
+  </section>
+  <!-- «О программе» и учётная запись — снова в настройках, каждая своим блоком (Ваше слово 28.11.2026; с 26.11 были значками вверху) -->
+  <section class="card set"><a class="srow go" id="aboutOpen" href="#about"><span>О программе</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a></section>
+  <section class="card set-acct" aria-label="Учётная запись">
+    <h2>Учётная запись</h2>
+    <p id="acctWho"></p><p class="small muted" id="acctSync"></p>
+    <button class="btn" id="signOut">Выйти</button><p class="err" id="signInErr"></p>
   </section>
   <details class="card howto hidden" id="setUsers">
     <summary><h2>Пользователи</h2><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
