@@ -9,6 +9,9 @@ const LANGS = {
   en: { name: 'английский', chip: 'EN', say: 'по-английски', to: 'на английский', forms: ['base', 'past', 'participle'] }
 };
 const LG = m => LANGS[m.lang] || LANGS.el;
+/* флаг языка — на полке и в настройках «Язык изучения»; нажатие — другой язык */
+const FLAG = { el: '🇬🇷', en: '🇬🇧' };
+const nextLang = () => { const k = Object.keys(LANGS); return k[(k.indexOf(G.lang) + 1) % k.length]; };
 const SLV_YAZ = ['el', 'en'];  /* языки со своим словарём (app/slovar.js: Slovar — греческий, Slovar.yazyk('en') — английский, 27.11.2026) */
 const TX = p => p.t ?? p.el;
 const TTL = m => m.title_t ?? m.title_el;
@@ -202,10 +205,9 @@ function audioOpen() {
     const t = setTimeout(f, 1500); audio.addEventListener('loadedmetadata', f);
   }));
 }
-/* «Голос: телефона» (настройка, 27.11.2026) — тексты своей озвучки (audio.layer 'golos': «Кино», пересказы) читаются голосом
-   телефона; записи блогеров — записью. stopAt = Infinity — «звучит» для всей машины ▶/⏸, конец — по концу реплики */
+/* голос телефона — только запасной, когда звука нет или он не скачался (выбора голоса нет с 28.11.2026: играет то, что озвучено).
+   stopAt = Infinity — «звучит» для всей машины ▶/⏸, конец — по концу реплики */
 let tts = null, ttsHeld = null;
-const ttsOn = (m, i) => telGolos() && (m.blok ? !!(m.phrases[i] && m.phrases[i].golos) : m.audio && m.audio.layer === 'golos') && !!voiceOf(m.lang || 'el');
 function ttsSay(i, rate, done) {
   const tok = seqToken, v = voiceOf(M.lang || 'el'), text = TX(P[i]), u = new SpeechSynthesisUtterance(text);
   u.voice = v; u.lang = v.lang; u.rate = rate;
@@ -224,7 +226,6 @@ function ttsSay(i, rate, done) {
 }
 function playOne(i, rate, done, waited) {
   cancelAnimationFrame(raf); audio.pause(); paused = false;
-  if (ttsOn(M, i)) { ttsHeld = null; return ttsSay(i, rate, done); }
   if (M.blok) return blokPlay(i, rate, done);
   if (!blobs[M.id] || (audio.readyState < 1 && !waited)) {
     const tok = seqToken, m = M;
@@ -262,9 +263,8 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 /* голос телефона для языка (el, en, ru) */
 const voiceOf = lang => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => new RegExp('^' + lang + '(-|_|$)', 'i').test(v.lang));
-/* «Голос»: Azure или телефона (Ваша просьба 27.11.2026) — на этом устройстве, вне учётной записи (тот же ключ читает slovar.js) */
-const GOLOS = 'ekmafisi-golos';
-const telGolos = () => { try { return localStorage.getItem(GOLOS) === 'tel'; } catch (e) { return false; } };
+/* выбора голоса нет (Ваше слово 28.11.2026: «Выбор не нужен»): прежний ключ «Голос: телефона» на устройстве — стереть */
+try { localStorage.removeItem('ekmafisi-golos'); } catch (e) {}
 const plural = (n, a, b, c) => (n % 10 === 1 && n % 100 !== 11) ? a : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? b : c;
 const RATE_LBL = r => r === 1 ? 'оригинал' : String(r).replace('.', ',') + '×';
 function counts(m, colors) {
@@ -372,7 +372,7 @@ function renderShelf() {
      родной экран (★, 🔊), иначе — экран «Фразы · N» из истории на сервере */
   $('frazaOpen').classList.toggle('hidden', !G.lang || EK.guest);
   $('frazaOpen').href = isAndr() ? andrUrl('fraza/istoriya') : '#fraza';
-  $('langFlag').textContent = { el: '🇬🇷', en: '🇬🇧' }[G.lang] || '🌐';
+  $('langFlag').textContent = FLAG[G.lang] || '🌐';
   $('langFlag').setAttribute('aria-label', 'Язык: ' + (G.lang ? LANGS[G.lang].name : 'не выбран') + '. Сменить');
   /* «Собрать фразу» (режим «Собери») — только у греческого; «Словарь» — у греческого и английского (27.11.2026); плитка — без ступени (26.11.2026) */
   const sbOn = G.lang === 'el' && !EK.guest;  /* гость: «Собери» нет (ИИ — только своим), «Словарь» есть */
@@ -401,7 +401,7 @@ $('wOk').onclick = () => { if (!shown('words')) { push('words'); show('words'); 
 document.querySelectorAll('#langPick [data-lang]').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderShelf(); });
 /* --- настройки: всё, что не учёба — язык, тема, учётная запись, итог --- */
 $('setOpen').onclick = () => { push('settings'); show('settings'); };
-$('langFlag').onclick = () => { const k = Object.keys(LANGS); G.lang = k[(k.indexOf(G.lang) + 1) % k.length]; saveG(); renderShelf(); };
+$('langFlag').onclick = () => { G.lang = nextLang(); saveG(); renderShelf(); };
 /* Настройки → «Пользователи» (только Антону, EK.admin): список подгружается, когда карточку раскрыли */
 const dmy = t => t ? new Date(t).toLocaleDateString('ru-RU') : '';
 async function renderUsers() {
@@ -439,17 +439,18 @@ $('usAdd').onsubmit = async ev => {
 const isAndr = () => { try { return localStorage.getItem('ekmafisi.android') === '1'; } catch (e) { return false; } };
 /* k — ключ устройства: по нему родная часть отправляет историю фраз на сервер (fraza_istoriya_put) */
 let FK = null;
-const andrUrl = path => `intent://${path}?tema=${themeNow()}&golos=${telGolos() ? 'tel' : 'azure'}${FK ? '&k=' + FK : ''}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
+const andrUrl = path => `intent://${path}${path.includes('?') ? '&' : '?'}tema=${themeNow()}&golos=azure${FK ? '&k=' + FK : ''}#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end`;
 $('frazaOpen').onclick = e => { if (isAndr()) return; e.preventDefault(); if (!shown('fraza')) { push('fraza'); show('fraza'); } };
 function renderSettings() {
   $('setUsers').classList.toggle('hidden', !EK.admin);
-  /* «Фраза на экране блокировки» и «Обновление программы» (родная часть: фраза, значок) — только в Android-приложении */
-  $('setFraza').classList.toggle('hidden', !isAndr()); $('setObn').classList.toggle('hidden', !isAndr());
-  $('setFraza').href = andrUrl('fraza'); $('setObn').href = andrUrl('fraza/obnovlenie');
-  document.querySelectorAll('#setGolos button').forEach(b => b.setAttribute('aria-pressed', String((b.dataset.g === 'tel') === telGolos())));
-  /* число статей словаря — здесь, не под полем поиска (Ваше слово 27.11.2026) */
-  const so = window.Slovar && Slovar.opisanie ? Slovar.opisanie() : ''; $('setSlv').textContent = so; $('setSlvRow').classList.toggle('hidden', !so);
-  document.querySelectorAll('#setLang button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === G.lang)));
+  /* «Фраза на экране блокировки» и «Обновить программу» (родная часть: фраза, значок) — только в Android-приложении */
+  $('setFraza').classList.toggle('hidden', !isAndr()); $('setObnRow').classList.toggle('hidden', !isAndr());
+  /* srazu=1: с 1.8 родная часть сверяется и ставит сразу, без своего экрана (ответ — всплывающей строкой); 1.7 и раньше — открывает экран обновления */
+  $('setFraza').href = andrUrl('fraza'); $('setObn').href = andrUrl('fraza/obnovlenie?srazu=1');
+  $('setVer').textContent = verTxt();
+  /* число статей словаря — простым текстом в конце экрана (Ваше слово 28.11.2026) */
+  $('setSlv').textContent = window.Slovar && Slovar.opisanie ? Slovar.opisanie() : '';
+  paintFlag();
   $('setBtN').value = G.btN || 3; $('setBtNV').textContent = G.btN || 3;
   closePops();
   paintBig();
@@ -467,14 +468,19 @@ function renderSettings() {
 }
 $('setBtN').oninput = () => { G.btN = +$('setBtN').value; $('setBtNV').textContent = G.btN; };
 $('setBtN').onchange = () => { G.btN = +$('setBtN').value; saveG(); };
-document.querySelectorAll('#setLang button').forEach(b => b.onclick = () => { G.lang = b.dataset.lang; saveG(); renderSettings(); });
-/* «Голос»: Azure (своя озвучка) или голос телефона — для всего синтезированного: словарь, «На слух» (и русский), тексты своей
-   озвучки («Кино», пересказы); записи блогеров звучат записью. На этом устройстве: голоса у телефона и компьютера разные */
-document.querySelectorAll('#setGolos button').forEach(b => b.onclick = () => {
-  try { localStorage.setItem(GOLOS, b.dataset.g); } catch (e) {}
-  if (b.dataset.g === 'tel' && !voiceOf((G.lang || 'el'))) alert('На этом устройстве нет голоса для этого языка — останется Azure. Голос ставится в настройках телефона: «Синтез речи» → Google → языки.');
-  renderSettings();
-});
+/* «Язык изучения» — флагом справа, тем же, что на полке; нажатие — другой язык (Ваше слово 28.11.2026) */
+function paintFlag() {
+  $('setLang').textContent = FLAG[G.lang] || '🌐';
+  $('setLang').setAttribute('aria-label', `Язык изучения: ${G.lang ? LANGS[G.lang].name : 'не выбран'}. Нажмите — ${LANGS[nextLang()].name}`);
+}
+$('setLang').onclick = () => { G.lang = nextLang(); saveG(); renderSettings(); };
+/* приписка под «Обновить программу»: версия приложения и последняя ли она — по прошлой сверке родной части (адрес запуска, с 1.8) */
+function verTxt() {
+  let a = null; try { a = JSON.parse(localStorage.getItem('ekmafisi.apk')); } catch (e) {}
+  if (!a || !a.v) return 'Версия 1.7 или раньше — обновите, и здесь будет номер';
+  if (!a.ps) return `Версия ${a.v}`;
+  return a.ps > a.vs ? `Версия ${a.v} — есть новее: ${a.posl}` : `Версия ${a.v} — последняя`;
+}
 /* крупный шрифт: +1…+5 px ко всем текстам, как в читалке (+4 и +5 — для планшета); только на этом устройстве (экраны телефона и Мака разные),
    ключ вне учётной записи — читается до входа (index.html). Ползунок — кегль меняется сразу, пока тянете */
 const UP = 'ekmafisi-up';
@@ -1826,9 +1832,6 @@ async function nsBlob(x) {  /* звук фразы: файл примера сл
   return url;
 }
 function nsSay(x, tok) {  /* фраза на языке: целый файл примера или отрезок файла текста [at, at + длительность] */
-  /* «Голос: телефона» — своя озвучка (примеры словаря, тексты «Кино» и пересказы) голосом телефона; записи блогеров — записью */
-  const lang = (x.m && x.m.lang) || 'el';
-  if (x.f && telGolos() && (!x.m || x.m.audio.layer === 'golos') && voiceOf(lang)) return nsPhone(x.f, lang, x.rate || nsRate(), tok);
   return nsBlob(x).then(url => new Promise((ok, no) => {
     if (tok !== NS.tok) return no('stop');
     const a = NS.a, rate = x.rate || nsRate();
@@ -1850,7 +1853,6 @@ function nsSay(x, tok) {  /* фраза на языке: целый файл п�
 }
 const ruVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^ru(-|_|$)/i.test(v.lang));
 async function nsRu(text, tok) {
-  if (telGolos()) return nsRuPhone(text, tok);
   const ri = await nsRuIndex(), z = ri && ri.i[text.split(/\s+/).join(' ').trim()];
   if (tok !== NS.tok) throw 'stop';
   if (z) {

@@ -27,7 +27,7 @@ const VSE = {};  /* язык → его словарь (одна копия на
 const sozdat = LANG => {
   const EL = LANG === 'el', SFX = EL ? '' : '.' + LANG;
   const YAZ = { el: { rod: 'греческого', im: 'Греческое', po: 'по-гречески, латиницей и по-русски', golos: 'athina' },
-    en: { rod: 'английского', im: 'Английское', po: 'по-английски и по-русски', golos: 'aoede' } }[LANG] || { rod: LANG, im: LANG, po: LANG, golos: '' };
+    en: { rod: 'английского', im: 'Английское', po: 'по-английски и по-русски', golos: 'leda' } }[LANG] || { rod: LANG, im: LANG, po: LANG, golos: '' };
   const CACHE = EL ? 'ekmafisi-slovar-v1' : `ekmafisi-slovar-${LANG}-v1`, ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = LANG + '/slovar2.json', RECENT = 'ekmafisi.slovar.nedavno' + SFX;
   const VKL = 'slovar-vkladka' + SFX;  /* открытая вкладка пустого поиска: n — недавние, i — избранные */
   const RECENT2 = 'ekmafisi.slovar.nedavno2' + SFX;  /* недавние со строкой списка { l, s, b } — видны, пока словарь открывается */
@@ -469,14 +469,11 @@ const sozdat = LANG => {
     return cached(k, async () => fetch((await EK.golos(text, LANG)).url));  /* функция golos: lang — голос и папка языка */
   }
   const golosId = () => (D && D.golos) || YAZ.golos || 'athina';  /* словарь ещё не открыт (карточка слова Экмафиси) — голос по умолчанию */
-  /* «Голос: телефона» (настройка Экмафиси, 27.11.2026; ключ на устройстве, вне учётной записи): вместо Azure — голос телефона */
-  const telGolos = () => { try { return localStorage.getItem('ekmafisi-golos') === 'tel'; } catch (e) { return false; } };
   async function play(text, path, btn) {  /* text — что сказать; path — заранее озвученный файл в хранилище или null */
     if (audio) { audio.pause(); audio = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
     btn && btn.classList.add('on');
     const done = () => btn && btn.classList.remove('on');
-    if (telGolos() && phoneVoice(text)) { setTimeout(done, 900); return; }
     try {
       const b = await azureBlob(text, path);
       if (b) {

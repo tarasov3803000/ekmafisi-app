@@ -21,6 +21,8 @@
 /* Android-приложение Экмафиси (TWA, android/): открыто из него — показать в настройках блок «Фраза на экране блокировки».
    Признак — ?app=android в адресе запуска или ссылка-источник android-app://; запоминается на устройстве */
 try { if (/[?&]app=android\b/.test(location.search) || document.referrer.startsWith('android-app://pro.antontarasov.ekmafisi')) localStorage.setItem('ekmafisi.android', '1'); } catch (e) {}
+/* версия Android-приложения (с 1.8 — в адресе запуска, Zapusk.kt): v — стоит, posl — последняя известная по прошлой сверке */
+try { const q = new URLSearchParams(location.search); if (q.get('v')) localStorage.setItem('ekmafisi.apk', JSON.stringify({ v: q.get('v'), vs: +q.get('vs') || 0, posl: q.get('posl') || '', ps: +q.get('ps') || 0 })); } catch (e) {}
 try { const u = localStorage.getItem('ekmafisi-up') ?? (localStorage.getItem('ekmafisi-big') === '1' ? '3' : '0'); document.documentElement.style.setProperty('--up', (+u || 0) + 'px'); } catch (e) {}</script>
 <link rel="stylesheet" href="tokeny.css">
 <style>
@@ -70,6 +72,14 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; color:
 .pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; width: 240px; max-width: calc(100vw - 48px); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.16); display: flex; }
 .pop input { width: 100%; height: 32px; accent-color: var(--accent); }
 .srow.go { color: inherit; text-decoration: none; }
+/* «Язык изучения» — флагом; нажатие — другой язык (Ваше слово 28.11.2026) */
+.sflag { font-size: 30px; line-height: 1; padding: 4px 6px; margin-right: -6px; border: 0; background: none; border-radius: 8px; }
+/* «Обновить программу» — кнопкой здесь же, под ней версия (Ваше слово 28.11.2026) */
+.srow.obn { display: grid; justify-content: stretch; gap: 6px; padding: 12px 0; }
+.srow.obn a.btn { justify-content: center; }
+.srow.obn p { margin: 0; text-align: center; }
+.set-foot { margin: 4px 4px 0; }  /* число статей словаря — простым текстом в конце экрана */
+.set-foot:empty { display: none; }
 .srow.go svg { color: var(--muted); flex: none; }
 .howto-txt { display: grid; gap: 8px; font-size: calc(15px + var(--up)); }
 .howto-txt ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
@@ -441,14 +451,12 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
 <main id="settings" class="hidden">
   <!-- всё на одном экране, строкой «название — выбор» (Ваше слово 26.11.2026); «Как пользоваться» — в окне ⓘ; ⓘ и учётная запись — значками в верхней строке, только на этом экране -->
   <section class="card set">
-    <div class="srow"><span>Учу</span><div class="seg" id="setLang" role="group" aria-label="Язык обучения"><button data-lang="el">греческий</button><button data-lang="en">английский</button></div></div>
+    <div class="srow"><span>Язык изучения</span><button class="sflag" id="setLang"></button></div>
     <div class="srow" id="setLevelCard"><span>Уровень</span><div class="seg" id="setLevel" role="group" aria-label="Уровни на полке"></div></div>
     <div class="srow"><span>Размер шрифта</span><span class="rng"><button class="val" id="setBigV" aria-expanded="false" aria-label="Размер шрифта"></button><span class="pop hidden"><input type="range" id="setBig" min="0" max="5" step="1" aria-label="Размер шрифта"></span></span></div>
     <div class="srow"><span>Обратный перевод — кол-во фраз</span><span class="rng"><button class="val" id="setBtNV" aria-expanded="false" aria-label="Обратный перевод — фраз за раз"></button><span class="pop hidden"><input type="range" id="setBtN" min="1" max="3" step="1" aria-label="Обратный перевод — фраз за раз"></span></span></div>
-    <div class="srow" id="setSlvRow"><span>Словарь</span><span class="small muted" id="setSlv" style="text-align:right"></span></div>
-    <div class="srow"><span>Голос</span><div class="seg" id="setGolos" role="group" aria-label="Голос озвучки"><button data-g="azure">Azure</button><button data-g="tel">телефона</button></div></div>
     <a class="srow go hidden" id="setFraza" href="intent://fraza#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Фраза на экране блокировки</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a>
-    <a class="srow go hidden" id="setObn" href="intent://fraza/obnovlenie#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end"><span>Обновление программы</span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></a>
+    <div class="srow obn hidden" id="setObnRow"><a class="btn wide" id="setObn" href="intent://fraza/obnovlenie?srazu=1#Intent;scheme=ekmafisi;package=pro.antontarasov.ekmafisi;end">Обновить программу</a><p class="small muted" id="setVer"></p></div>
   </section>
   <details class="card howto hidden" id="setUsers">
     <summary><h2>Пользователи</h2><svg class="chev" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
@@ -463,6 +471,7 @@ textarea { width: 100%; min-height: 64px; font: calc(18px + var(--up))/1.4 var(-
       </form>
     </div>
   </details>
+  <p class="small muted set-foot" id="setSlv"></p>
 </main>
 
 <!-- ⓘ — о программе: как пользоваться («Итог» убран 26.11.2026 — прогресс на сервере) -->
