@@ -9,6 +9,7 @@ const LANGS = {
   en: { name: 'английский', chip: 'EN', say: 'по-английски', to: 'на английский', forms: ['base', 'past', 'participle'] }
 };
 const LG = m => LANGS[m.lang] || LANGS.el;
+const SLV_YAZ = ['el', 'en'];  /* языки со своим словарём (app/slovar.js: Slovar — греческий, Slovar.yazyk('en') — английский, 27.11.2026) */
 const TX = p => p.t ?? p.el;
 const TTL = m => m.title_t ?? m.title_el;
 const AUTHOR = m => m.source.author_ru || m.source.author;
@@ -320,7 +321,7 @@ function applyLoc(force) {  /* force — первый вход: экран ри�
   const t = parseHash(curHash()), sh = history.state && history.state.sheet;
   if (['shelf', 'settings', 'about', 'nasluh', 'words', 'fraza'].includes(t.v)) { if (force || !shown(t.v)) show(t.v); }
   else if (t.v === 'check') { if (force || !shown('check')) checkOpen(); }
-  else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slv().show(t.l, t.m); }
+  else if (t.v === 'slovar') { if (force || !shown('slovar')) show('slovar'); slvPokaz().show(t.l, t.m); }
   else if (t.v === 'soberi') { if (force || !shown('soberi')) soberiOpen(); }
   else if (t.v === 'sbgo') { if (force || !shown('sbgo')) sbGo(SB.step); }
   else {
@@ -373,9 +374,9 @@ function renderShelf() {
   $('frazaOpen').href = isAndr() ? andrUrl('fraza/istoriya') : '#fraza';
   $('langFlag').textContent = { el: '🇬🇷', en: '🇬🇧' }[G.lang] || '🌐';
   $('langFlag').setAttribute('aria-label', 'Язык: ' + (G.lang ? LANGS[G.lang].name : 'не выбран') + '. Сменить');
-  /* «Собрать фразу» (режим «Собери») и «Словарь» — только у греческого; плитка — без ступени (26.11.2026) */
+  /* «Собрать фразу» (режим «Собери») — только у греческого; «Словарь» — у греческого и английского (27.11.2026); плитка — без ступени (26.11.2026) */
   const sbOn = G.lang === 'el' && !EK.guest;  /* гость: «Собери» нет (ИИ — только своим), «Словарь» есть */
-  $('slvOpen').classList.toggle('hidden', G.lang !== 'el');
+  $('slvOpen').classList.toggle('hidden', !SLV_YAZ.includes(G.lang));
   $('sbCard').classList.toggle('hidden', !sbOn);
   /* гость: открыто своё (пересказы, своя озвучка); прочие тексты — по ролику или фильму — только своим, после входа */
   const gn = EK.guest && G.lang;
@@ -615,6 +616,8 @@ function glossHtml(w, p, k) {
     if (isEl) h += `<div class="kr" data-kr="${esc(w.l)}"${f ? ` data-alt="${esc(f)}"` : ''}></div>`;
     if (f) h += note;
   }
+  /* английское слово — статья своего словаря, если есть (enFill): транскрипция, три формы; слово в заголовке ведёт к «Значениям» */
+  if (!isEl) h += enSlHtml(w.l, L);
   /* «Происхождение ›» с выжимкой — второй путь к статье, для тех, кто про долгое нажатие не знает (решение 5.11.2026) */
   if (!M || M.lang === 'el') h += Slovar.etimRow(w.l, Slovar.etimSync(w.l));
   return h;
@@ -692,7 +695,20 @@ function headHtml(l, D) {
 }
 /* box — место под фразой (широкий экран); без него — окно поверх */
 const boxOf = (box, ttl) => { if (box) return [box, `<h2>${ttl}</h2>`]; $('eTtl').textContent = ttl; return [$('eBody'), '']; };
+/* английский (27.11.2026): «Значения» — статья своего словаря (Slovar.yazyk('en')), тем же видом, что у греческого словаря текста */
+const enDict = s => s && { dict: { senses: s.z.map(z => ({ label: z.lb || '', ru: z.ru, ex: (z.ex || []).map(x => ({ el: x.el, ru: x.ru || '' })) })),
+  phrases: (s.f || []).map(x => ({ el: x.el, ru: x.ru || '' })), forms: s.f3 ? s.f3.join(' · ') : '' } };
 function renderSenses(l, inl) {
+  const yaz = (M && M.lang) || G.lang || 'el';
+  if (yaz !== 'el' && SLV_YAZ.includes(yaz) && !LEX[l]) {
+    const [box, top] = boxOf(inl, 'Значения');
+    box.innerHTML = top + `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Открываю словарь…</p>`;
+    Slovar.yazyk(yaz).statya(l).then(s => { if (s) LEX[l] = enDict(s); renderSenses2(l, inl); }, () => renderSenses2(l, inl));
+    return;
+  }
+  renderSenses2(l, inl);
+}
+function renderSenses2(l, inl) {
   const D = LEX[l], [box, top] = boxOf(inl, 'Значения');
   if (!D) { box.innerHTML = top + `<div class="e-head"><span class="lem">${esc(l)}</span></div><p class="muted">Статьи пока нет.</p>`; return; }
   box.innerHTML = top + headHtml(l, D) + sensesHtml(D.dict) + `<div class="e-foot"><span>Значения написаны ИИ (Claude) по Викисловарю (CC BY-SA); человеком — не проверено.</span></div>`;
@@ -1339,13 +1355,25 @@ $('cOn').onclick = () => { stop(); ck.k++; ck.tries = 0; ck.res = null; ck.keep 
 $('cPlay').onclick = () => toggle($('cPlay'), () => playBy($('cPlay'), ck.q[ck.k].i, G.rate));
 
 /* --- «Словарь»: весь свой словарь, общий модуль с приложением «Словарь» (app/slovar.js); #slovar — поиск, #slovar/<лемма> — статья --- */
-let SLV = null;
-const slv = () => SLV || (SLV = Slovar.mount($('slvBox'), {
-  dve: true,  /* от 1000 px — две панели: список слева, статья справа (27.11.2026) */
-  onPick: (l, m) => { push('slovar/' + encodeURIComponent(l) + (m ? '/' + m : '')); SLV.show(l, m); },
-  onBack: () => goBack('slovar')
-}));
-$('slvOpen').onclick = () => { push('slovar'); show('slovar'); slv().show(null); slv().focus(); slv().ready.then(() => shown('slovar') && slv().focus()); };
+/* у каждого языка — свой словарь (Slovar.yazyk, 27.11.2026) в своём ящике внутри #slvBox: виден словарь языка полки,
+   поиск и открытая статья другого языка остаются на месте до возвращения к нему. Адрес #slovar/<лемма> — у языка полки */
+const SLV = {};
+const slvLang = () => G.lang === 'en' ? 'en' : 'el';
+const slv = (lang = slvLang()) => SLV[lang] || (SLV[lang] = (() => {
+  const box = document.createElement('div'); box.dataset.lang = lang; $('slvBox').appendChild(box);
+  const api = Slovar.yazyk(lang).mount(box, {
+    dve: true,  /* от 1000 px — две панели: список слева, статья справа (27.11.2026) */
+    onPick: (l, m) => { push('slovar/' + encodeURIComponent(l) + (m ? '/' + m : '')); api.show(l, m); },
+    onBack: () => goBack('slovar')
+  });
+  return api;
+})());
+function slvPokaz() {
+  const lang = slvLang(), api = slv(lang);
+  [...$('slvBox').children].forEach(b => b.classList.toggle('hidden', b.dataset.lang !== lang));
+  return api;
+}
+$('slvOpen').onclick = () => { const a = slvPokaz(); push('slovar'); show('slovar'); a.show(null); a.focus(); a.ready.then(() => shown('slovar') && a.focus()); };
 
 /* --- «Слова»: сверху — сколько освоено; ниже первая тысяча частотных лемм языка (material/<lang>/chastoty) --- */
 let FREQ = {};
@@ -1375,7 +1403,7 @@ function renderWord(l) {
       ${(G.lang || 'el') === 'el' ? `<div class="kr" data-kr="${esc(l)}"${x.forms ? ` data-alt="${esc(x.forms.join(' · '))}"` : ''}></div>`
         : x.forms ? `<span class="el muted">${esc(x.forms.join(' · '))}</span>` : ''}
       ${p ? `<span class="small muted"><span class="el">${esc(TX(p))}</span><br>${esc(p.ru)}</span>` : ''}</div>
-    ${D && D.dict.senses.length ? `<div class="gl-links"><button class="link" data-senses="${esc(l)}">Значения</button></div>` : ''}
+    ${D && D.dict.senses.length ? `<div class="gl-links"><button class="link" data-senses="${esc(l)}">Значения</button></div>` : (G.lang || 'el') !== 'el' ? enSlHtml(l, { ru: L.ru, forms: x.forms }) : ''}
     ${(G.lang || 'el') === 'el' ? Slovar.etimRow(l, Slovar.etimSync(l)) : ''}`;
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-word]'); if (b) { push(curHash(), { k: 'word', l: b.dataset.word }); openSheet(history.state.sheet); } });
@@ -1689,7 +1717,31 @@ function krFit(el) {
   t.outerHTML = `<div class="kr-v" lang="el">${out.join('')}</div>`;
 }
 addEventListener('resize', () => document.querySelectorAll('[data-krd]').forEach(krFit));
-new MutationObserver(() => document.querySelectorAll('[data-kr]:not([data-krd])').forEach(krFill)).observe(document.body, { childList: true, subtree: true });
+new MutationObserver(() => {
+  document.querySelectorAll('[data-kr]:not([data-krd])').forEach(krFill);
+  document.querySelectorAll('[data-ensl]:not([data-ensld])').forEach(enFill);
+}).observe(document.body, { childList: true, subtree: true });
+/* --- английское слово (27.11.2026): <div data-ensl="лемма" data-ru="0|1" data-f3="0|1"> — статья своего словаря
+   (Slovar.yazyk('en').statya), если есть: значения (когда в lexicon текста перевода нет, data-ru="0"), транскрипция, три формы
+   неправильного глагола (когда их нет в lexicon, data-f3="0") и «Значения» — вся статья. Статьи или словаря нет — пусто:
+   карточка как была, из lexicon. Словарь открывается при первом слове (≈ 1–3 МБ на 5 000 статей), дальше из кэша */
+const enSlHtml = (l, L) => `<div class="ensl" data-ensl="${esc(l)}" data-ru="${L && L.ru ? 1 : 0}" data-f3="${L && L.forms ? 1 : 0}"></div>`;
+function enFill(el) {
+  el.dataset.ensld = '1';
+  Slovar.yazyk('en').statya(el.dataset.ensl).then(s => {
+    if (!s || !el.isConnected) return;
+    const h = [];
+    if (el.dataset.ru === '0' && s.z.length) h.push(`<div>${esc(cap(s.z.slice(0, 3).map(z => z.ru).join('; ')))}</div>`);
+    if (s.i) h.push(`<div class="small muted" lang="en">${esc(s.i)}</div>`);
+    if (s.f3 && el.dataset.f3 === '0') h.push(`<div class="el">${esc(s.f3.join(' · '))}</div>`);
+    /* «Значения» — по слову в заголовке карточки (как у main с 27.11: ссылки «Значения» под карточкой нет); в окне «Слово»
+       заголовка-кнопки нет — ссылкой */
+    const hw = el.parentElement.querySelector('span.gl-w');
+    if (hw) hw.outerHTML = `<button class="gl-w el" lang="en" data-senses="${esc(s.l)}">${hw.innerHTML}</button>`;
+    else if (!el.parentElement.querySelector(`[data-senses="${CSS.escape(el.dataset.ensl)}"]`)) h.push(`<div class="gl-links"><button class="link" data-senses="${esc(s.l)}">Значения</button></div>`);
+    el.innerHTML = h.join('');
+  }, () => {});
+}
 
 /* --- «На слух» (Ваше задание 26.11.2026): фраза на языке → 1 с → по-русски → 1 с → снова на языке → пауза (G.nsPause, 10–120 с) → следующая.
    На экране — фраза и перевод крупно, звучащая строка подсвечена. Откуда фразы — выбор, запоминается (G.nsSrc):
@@ -2054,6 +2106,7 @@ EK.onRemote = ({ progress, log, settings }) => {
     else if (k === 'flags') write(FKEY, r.v || {});
     else if (k === 'soberi') { SB = Object.assign(SB, r.v || {}); write(SBKEY, SB); }
     else if (k === 'izbr') write('ekmafisi.izbr', r.v || []);  /* → ekmafisi.<id>.izbr, избранные слова словаря (app/slovar.js) */
+    else if (k === 'izbr-en') write('ekmafisi.izbr-en', r.v || []);  /* английский словарь — свой список (27.11.2026) */
     else if (k.startsWith('pos.') && byId[k.slice(4)]) Object.assign(progFor(k.slice(4)), r.v || {});
   });
   write(TKEY, T); write(SKEY, G);

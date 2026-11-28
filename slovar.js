@@ -17,13 +17,22 @@
    Нет сети, предел месяца или отказ — голос телефона el-GR.
    Происхождение слова: el/etim.json → el/etim-<отп>.txt.gz (tools/etim_telefon.py) — свой файл и кэш; в статье — строка
    «Происхождение ›», долгое нажатие на слово — его статья (#<лемма>/etym). Экмафиси берёт то же: etimLoad, etimHtml, etimRow.
-   Хост даёт: EK.remote(путь) → fetch-ответ из хранилища; переходы — onPick(lemma) и onBack(); показ — api.show(lemma | null). */
+   Хост даёт: EK.remote(путь) → fetch-ответ из хранилища; переходы — onPick(lemma) и onBack(); показ — api.show(lemma | null).
+   Языки (27.11.2026): window.Slovar — греческий, как было; Slovar.yazyk('en') — тот же модуль для английского: свои файлы
+   en/slovar2*.json, en/etim.json, свой кэш, «Недавние», вкладка и избранное. Различия — только в нормализации поиска
+   (en: без регистра, ’ и ' одно, формы → лемма из указателя, I'm → I am) и в греческой грамматике (падежи, 4 формы, θα/να —
+   только el); у английского — строка трёх форм неправильного глагола (f3). Формат статьи — тот же (tools/slovar_telefon.py). */
 (() => {
-  const CACHE = 'ekmafisi-slovar-v1', ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = 'el/slovar2.json', RECENT = 'ekmafisi.slovar.nedavno';
-  const VKL = 'slovar-vkladka';  /* открытая вкладка пустого поиска: n — недавние, i — избранные */
-  const RECENT2 = 'ekmafisi.slovar.nedavno2';
-  const STATEY = 'ekmafisi.slovar.statey';  /* число статей — для строки в настройках, и пока словарь не открыт */
-  const HIST_MAX = 5000;  /* история поиска на главной — вся (27.11.2026; было 30); предел — только чтобы не упереться в память браузера (~1 МБ) */  /* недавние со строкой списка { l, s, b } — видны, пока словарь открывается */
+const VSE = {};  /* язык → его словарь (одна копия на страницу) */
+const sozdat = LANG => {
+  const EL = LANG === 'el', SFX = EL ? '' : '.' + LANG;
+  const YAZ = { el: { rod: 'греческого', im: 'Греческое', po: 'по-гречески, латиницей и по-русски', golos: 'athina' },
+    en: { rod: 'английского', im: 'Английское', po: 'по-английски и по-русски', golos: 'ava' } }[LANG] || { rod: LANG, im: LANG, po: LANG, golos: '' };
+  const CACHE = EL ? 'ekmafisi-slovar-v1' : `ekmafisi-slovar-${LANG}-v1`, ZCACHE = 'ekmafisi-slovar-zvuk-v1', PTR = LANG + '/slovar2.json', RECENT = 'ekmafisi.slovar.nedavno' + SFX;
+  const VKL = 'slovar-vkladka' + SFX;  /* открытая вкладка пустого поиска: n — недавние, i — избранные */
+  const RECENT2 = 'ekmafisi.slovar.nedavno2' + SFX;  /* недавние со строкой списка { l, s, b } — видны, пока словарь открывается */
+  const STATEY = 'ekmafisi.slovar.statey' + SFX;  /* число статей — для строки в настройках, и пока словарь не открыт */
+  const HIST_MAX = 5000;  /* история поиска на главной — вся (27.11.2026; было 30); предел — только чтобы не упереться в память браузера (~1 МБ) */
   const SKOR = 'slovar-skorost';  /* скорость голоса 0,6–1,2 ползунком (17.11.2026: по умолчанию 0,9; 25.11.2026: ползунок), общая с Экмафиси */
   const ckey = p => new URL('slovar/' + p, location.origin + '/').href;  /* ключ кэша — один на оба приложения (один адрес github.io) */
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -32,6 +41,13 @@
   const ru = s => s.toLowerCase().replace(/ё/g, 'е');
   const lat = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const isGr = s => /[Ͱ-Ͽἀ-῿]/.test(s), isRu = s => /[а-яё]/i.test(s);
+  /* английский ключ — так же en_klyuch в tools/slovar_telefon.py: без знаков над буквами (café), строчными, ’ ‘ ʼ ` → ', пробелы — один */
+  const en = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[’‘ʼ`´]/g, "'").replace(/\s+/g, ' ').trim();
+  const nrm = EL ? gr : en;  /* ключ слова изучаемого языка — в указателе 'g' */
+  /* сокращения: I'm → i am, don't → do not, there's → there is (притяжательное 's — тоже «is»: John's → john, be — годится) */
+  const SOKR = [[/\bcan't\b/g, 'can not'], [/\bwon't\b/g, 'will not'], [/\bshan't\b/g, 'shall not'], [/\bain't\b/g, 'am not'], [/n't\b/g, ' not'],
+    [/'m\b/g, ' am'], [/'re\b/g, ' are'], [/'ve\b/g, ' have'], [/'ll\b/g, ' will'], [/'d\b/g, ' would'], [/\blet's\b/g, 'let us'], [/'s\b/g, ' is'], [/s'(?=\s|$)/g, 's']];
+  const raskryt = k => SOKR.reduce((s, [a, b]) => s.replace(a, b), k).replace(/\s+/g, ' ').trim();
   /* запрос: знаки по краям долой (диктовка ставит точку), в том числе греческие ; и · */
   const chist = q => q.replace(/^[\s.,;:!?«»"'()…·\u037e\u0387\u2019\u2018\u201c\u201d-]+|[\s.,;:!?«»"'()…·\u037e\u0387\u2019\u2018\u201c\u201d-]+$/g, '');
   /* составные формы: θα πάμε, να πάω, έχω πάει — ищется смысловая часть */
@@ -71,7 +87,7 @@
     const hl = new DataView(buf).getUint32(0, true), h = JSON.parse(dec.decode(new Uint8Array(buf, 4, hl))), base = 4 + hl;
     const u8 = n => new Uint8Array(buf, base + h.sec[n][0], h.sec[n][1]), u32 = n => new Uint32Array(buf, base + h.sec[n][0], h.sec[n][1] / 4);
     const ix = n => ({ K: u8(n + 'K'), Ko: u32(n + 'Ko'), Po: u32(n + 'Po'), P: u32(n + 'P') });
-    const d = { n: h.n, zvuk: h.zvuk, zvukP: h.zvukP, golos: h.golos || 'athina', ptr: p, g: ix('g'), ru: ix('ru'), la: ix('la'),
+    const d = { n: h.n, zvuk: h.zvuk, zvukP: h.zvukP, golos: h.golos || YAZ.golos, ptr: p, g: ix('g'), ru: ix('ru'), la: ix('la'),
       rB: u8('rB'), rO: u32('rO'), sO: u32('sO'), s: null, sP: null, art: new Map(), pp: null };
     if (h.sec.S) Object.assign(d, { s: u8('S'), O: u32('O'), X: new Set(u32('X')) });  /* поправка: статьи — тут же */
     return d;
@@ -145,8 +161,8 @@
     return { l: t.slice(0, a), s: t.slice(a + 1, b), z: t.slice(b + 1).split('\x1f') };
   }
   const brief = z => z.slice(0, 3).join('; ');
-  function by(l) {  /* лемма → номер: заголовок всегда есть среди греческих ключей */
-    for (const i of exactAll('g', gr(l))) if (row(i).l === l) return i;
+  function by(l) {  /* лемма → номер: заголовок всегда есть среди ключей слов языка */
+    for (const i of exactAll('g', nrm(l))) if (row(i).l === l) return i;
     return undefined;
   }
   async function stat(i) {  /* статья целиком — разбирается при открытии; статьи ещё читаются — подождать */
@@ -204,8 +220,10 @@
      Открытие — пробег по байтам за строками (лемма → [начало, конец]), статья разбирается, когда открыта.
      Новая версия — как у словаря: при первом обращении, при возврате в приложение (не чаще раза в 5 минут); подменяет сразу.
      Экмафиси зовёт etimLoad() сам, без словаря: строке «Происхождение ›» в карточке слова словарь на 24 МБ не нужен. */
-  const ECACHE = 'ekmafisi-etim-v1', EPTR = 'el/etim.json';
-  let E = null, eLoading = null, eChecking = null, eChecked = 0, eListen = false;
+  const ECACHE = EL ? 'ekmafisi-etim-v1' : `ekmafisi-etim-${LANG}-v1`, EPTR = LANG + '/etim.json';
+  /* eNet — у языка статей о происхождении пока нет (указатель 404, как у английского 27.11.2026): до перезагрузки страницы
+     не спрашиваем снова, статьи нет (null), строки «Происхождение ›» нет */
+  let E = null, eLoading = null, eChecking = null, eChecked = 0, eListen = false, eNet = false;
   function eRazobrat(buf, p) {
     const u8 = new Uint8Array(buf), ix = new Map(), bx = new Map();
     for (let a = 0, i = 0; i < u8.length; i++) if (u8[i] === 10) {
@@ -220,12 +238,16 @@
   async function eUborka(c, p) { for (const r of await c.keys()) if (r.url !== ckey(EPTR) && r.url !== ckey(raspak(p.etim))) c.delete(r); }
   function etimLoad() {
     if (E) return Promise.resolve(E);
+    if (eNet) return Promise.reject(new Error('Статей о происхождении для этого языка пока нет.'));
     return eLoading || (eLoading = (async () => {
       const c = await caches.open(ECACHE), hit = await c.match(ckey(EPTR));
       let p = hit ? await hit.json() : null;
       if (!p) {
         if (!navigator.onLine) throw new Error('Статьи о происхождении ещё не загружались на этот телефон — откройте один раз со связью.');
-        const r = await EK.remote(EPTR); if (!r.ok) throw new Error('Статьи о происхождении не загрузились.');
+        /* файла нет: в ?dev — ответ 404, у хранилища — ошибка подписи ссылки «Object not found» */
+        const r = await EK.remote(EPTR).catch(e => { if (/not.?found|404/i.test(String((e && e.message) || '') + ' ' + ((e && e.statusCode) || ''))) return { ok: false, status: 404 }; throw e; });
+        if (r.status === 400 || r.status === 404) { eNet = true; throw new Error('Статей о происхождении для этого языка пока нет.'); }
+        if (!r.ok) throw new Error('Статьи о происхождении не загрузились.');
         p = await r.json();
       }
       E = await eOtkryt(c, p);
@@ -253,14 +275,14 @@
   }
   const eLemma = l => !E || !l ? null : E.ix.has(l) ? l : E.ix.has(l.normalize('NFC')) ? l.normalize('NFC') : null;
   function etimSync(l) {  /* статья или null (нет); undefined — файл ещё не открыт */
-    if (!E) return undefined;
+    if (!E) return eNet ? null : undefined;
     const k = eLemma(l); if (!k) return null;
     if (E.art.has(k)) return E.art.get(k);
     const [a, b] = E.ix.get(k), x = JSON.parse(dec.decode(E.u8.subarray(a, b)));
     if (E.art.size > 50) E.art.delete(E.art.keys().next().value);
     E.art.set(k, x); return x;
   }
-  const etim = l => etimLoad().then(() => etimSync(l));
+  const etim = l => etimLoad().then(() => etimSync(l), e => { if (eNet) return null; throw e; });
   /* слово из статьи → лемма, у которой есть своя статья: точно, иначе без ударений («στολ(ίζω)» → στολίζω) */
   const eSsylka = w => { if (!E) return null; const k = eLemma(w); return k || E.bx.get(gr(w)) || null; };
 
@@ -305,7 +327,7 @@
     const id = uuid(), at = new Date().toISOString(), log = readJ(k) || [];
     log.push({ id, l, t: at.slice(0, 16) });
     try { localStorage.setItem(k, JSON.stringify(log)); } catch (e) {}
-    if (EK.queueLog) EK.queueLog({ id, at, kind: 'etym', lang: 'el', lemma: l });
+    if (EK.queueLog) EK.queueLog({ id, at, kind: 'etym', lang: LANG, lemma: l });
   }
   function etimIstoriya() {  /* [{ l, n, t }] — последние сверху */
     const seen = new Map();
@@ -348,8 +370,26 @@
     if (D.pp) for (const j of prefix(D.pp[name], key, lim)) for (const i of ids(D.pp[name], j)) set.add(D.n + i);
     return set;
   }
+  /* английский: точное — заголовок, потом форма (went → go, children → child: формы — ключами в указателе), дальше начало слова.
+     Точного нет — сокращения раскрыты и каждое слово само по себе: «I'm» → I, be; «gave up» → give up (слова → их леммы), give, up */
+  function searchEn(q) {
+    const k = en(q), pre = w => [...prefixAll('g', w, 600, new Set())].sort(byRk);
+    let ex = exactAll('g', k);
+    if (D.pp && ex.some(i => i >= D.n)) {  /* есть статьи поправки — заново: сначала заголовок, потом по частоте (как у греческого) */ const z = new Map(ex.map(i => [i, nrm(row(i).l) !== k])); ex = ex.sort((a, b) => z.get(a) - z.get(b) || byRk(a, b)); }
+    if (ex.length) return [...new Set([...ex, ...pre(k)])];
+    const w = raskryt(k).split(' ').map(chist).filter(Boolean);
+    if (!w.length) return [];
+    const hits = w.map(x => exactAll('g', x)), out = [];
+    if (w.length > 1) {  /* «gave up» → give up, «went on» → go on: каждое слово — его лемма (самая частая), вместе */
+      const lem = hits.map((h, j) => h.length ? nrm(row(h.reduce((a, b) => rk(b) < rk(a) ? b : a)).l) : w[j]);
+      out.push(...exactAll('g', lem.join(' ')), ...exactAll('g', w.join(' ')));
+    }
+    hits.forEach(h => out.push(...h));
+    return [...new Set([...out, ...pre(w.length > 1 ? w.join(' ') : w[0]), ...pre(w[w.length - 1])])];
+  }
   function search(q) {
     q = chist(q.trim()); if (!q) return [];
+    if (!EL && !isRu(q)) return searchEn(q);
     if (isGr(q)) {  /* сначала точное (заголовок, затем форма — так сложено в файле), потом начало слова — всё по частоте */
       let k = gr(q);
       if (/\s/.test(k) && !exactAll('g', k).length) { const w = k.split(/\s+/).map(chist).filter(x => x && !AUX.has(x)); if (w.length) k = w[w.length - 1]; }
@@ -389,7 +429,9 @@
   /* --- звук: Azure из хранилища (в кэш), иначе голос телефона --- */
   /* скорость голоса: Azure — playbackRate с сохранением высоты (как у фраз Экмафиси), голос телефона — rate */
   const skorost = () => { const v = +readJ(SKOR); return v >= 0.5 && v <= 1.5 ? v : 0.9; };  /* ползунок 0,6–1,2 (решение 25.11.2026) */
-  const elVoice = () => (window.speechSynthesis ? speechSynthesis.getVoices() : []).find(v => /^el(-|_|$)/i.test(v.lang));
+  const VRE = new RegExp('^' + LANG + '(-|_|$)', 'i');  /* голос телефона: у английского — сначала en-US (как Azure), потом любой en */
+  const elVoice = () => { const vs = (window.speechSynthesis ? speechSynthesis.getVoices() : []).filter(v => VRE.test(v.lang));
+    return (!EL && vs.find(v => /^en[-_]US/i.test(v.lang))) || vs[0]; };
   let audio = null;
   /* что сказать: два-три артикля на выбор — один, мужской, если есть (ο/η γιατρός → ο γιατρός); так же — tools/azure_golos.py skazat и функция golos */
   const ART = /^((?:ο|η|το|οι|τα)(?:\/(?:ο|η|το|οι|τα))+)\s/;
@@ -423,10 +465,10 @@
   async function azureBlob(text, path) {
     if (path) { const b = await cached(ckey(path), () => EK.remote(path)); if (b) return b; }
     if (!window.EK || !EK.golos || !window.crypto || !crypto.subtle) return null;
-    const k = ckey(`el/zvuk-zapros/${golosId()}/${await zaprosKey(text)}.mp3`);
-    return cached(k, async () => fetch((await EK.golos(text)).url));
+    const k = ckey(`${LANG}/zvuk-zapros/${golosId()}/${await zaprosKey(text)}.mp3`);
+    return cached(k, async () => fetch((await EK.golos(text, LANG)).url));  /* функция golos: lang — голос и папка языка */
   }
-  const golosId = () => (D && D.golos) || 'athina';  /* словарь ещё не открыт (карточка слова Экмафиси) — голос по умолчанию */
+  const golosId = () => (D && D.golos) || YAZ.golos || 'athina';  /* словарь ещё не открыт (карточка слова Экмафиси) — голос по умолчанию */
   /* «Голос: телефона» (настройка Экмафиси, 27.11.2026; ключ на устройстве, вне учётной записи): вместо Azure — голос телефона */
   const telGolos = () => { try { return localStorage.getItem('ekmafisi-golos') === 'tel'; } catch (e) { return false; } };
   async function play(text, path, btn) {  /* text — что сказать; path — заранее озвученный файл в хранилище или null */
@@ -445,7 +487,7 @@
         await audio.play(); return;
       }
     } catch (e) { console.warn('slovar: звук', e); }
-    if (!phoneVoice(text)) { done(); btn && (btn.title = 'Нет голоса Azure и греческого голоса на телефоне'); return; }
+    if (!phoneVoice(text)) { done(); btn && (btn.title = `Нет голоса Azure и ${YAZ.rod} голоса на телефоне`); return; }
     setTimeout(done, 900);
   }
 
@@ -524,7 +566,7 @@
 /* подсказка по долгому нажатию на значок («История просмотров», «В избранное») */
 .slv-tip { position: fixed; z-index: 30; max-width: 70vw; background: var(--ink); color: var(--paper); font: 600 calc(14px + var(--up, 0px)) var(--f-ui); padding: 6px 10px; border-radius: 8px; pointer-events: none; box-shadow: 0 4px 16px rgb(0 0 0 / .25); }
 /* греческое в статье и списке — без выделения: касание не зовёт подсказки Google (Touch to Search), как .w в Экмафиси */
-.slv-art [lang="el"], .slv-list .w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.slv-art [lang="el"], .slv-art [lang="en"], .slv-list .w { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* греческое слово в примере и выражении — касание открывает его статью (решение 17.11.2026); без подчёркивания, нажатие — подложкой */
 .slv-w { cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
 .slv-w:active, .slv-w.on { background: var(--accent-soft); }
@@ -765,14 +807,16 @@
      (аориста нет, только мн., несклон., отлож., безл., падеж после предлога); образцы употребления («προλαβαίνω να + гл. —
      успеть сделать», «μετά από + вин.», «λέω κάτι σε κάποιον») — первыми в «Выражения»; прочая грамматика (формы, варианты,
      род, «перех.», «не путать с») — блоком «Заметки» внизу. Данные не трогаются: делится при отрисовке */
-  const NGR = /[Ͱ-Ͽἀ-῿]/, NGR0 = /^[Ͱ-Ͽἀ-῿]/;
+  const PIS = EL ? 'Ͱ-Ͽἀ-῿' : 'A-Za-z';  /* буквы изучаемого языка в заметке */
+  const NGR = new RegExp(`[${PIS}]`), NGR0 = new RegExp(`^[${PIS}]`);
   const NVERH = /^(?:неправ\.?:?\s*)?(?:аориста нет|нет аориста|без аориста|только\s|несклон|не склон|нескл|неизм|не изм|отлож|безл\.?$|безл\.?,\s*только)/i;
   const NGRAMM = /^(?:вариант|тж\.|также|мн\.|ед\.|род\.|вин\.|им\.|ж\.|м\.|ср\.|сравн|превосх|уменьш|увелич|страд|аор|прош|буд|повел|прич|сущ|нареч|жен|муж|книжн|разг|синоним|антоним|=)/;
   const NRUGR = /^(?:ж\.|м\.|ср\.|общ|обычно (?:мн|ед)|чаще (?:мн|ед)|часто (?:мн|ед|как сущ|субст)|только|перех|неперех|непереход|переход|субстантив|(?:обычно )?с прописной|книжн|разг|вариант|устар|мн\.|ед\.)/;
   const NGRLB = /^(?:αόρ|παθ|μτχ|ενεστ|μέλλ|πληθ|θηλ|ουδ)\./;  /* греческие пометы: «αόρ. αισθάνθηκα» — форма, не выражение */
   const glubina = s => (s.match(/\(/g) || []).length - (s.match(/\)/g) || []).length;
   /* «безл. μου έρχεται» → { lb: 'безл.', el: 'μου έρχεται' }: русская помета перед греческим — подписью, как у значений */
-  const pometa = (el, ru) => { const m = el.match(/^([^Ͱ-Ͽἀ-῿]*?[.:])\s+(?=[Ͱ-Ͽἀ-῿])/); return m && !/[+—«(]/.test(m[1]) ? { lb: m[1].replace(/:$/, ''), el: el.slice(m[0].length), ru } : { el, ru }; };
+  const PMT = new RegExp(`^([^${PIS}]*?[.:])\\s+(?=[${PIS}])`);
+  const pometa = (el, ru) => { const m = el.match(PMT); return m && !/[+—«(]/.test(m[1]) ? { lb: m[1].replace(/:$/, ''), el: el.slice(m[0].length), ru } : { el, ru }; };
   function notaRazbor(s) {  /* → { verh, vyr: [{ lb?, el, ru }], ost } */
     const verh = [], vyr = [], ost = [];
     for (let seg of (s.n || '').split(/;\s*/)) {
@@ -795,7 +839,9 @@
   const formyT = (s, t) => t && glagol(s) ? formy4(t) : null;
   function notaHtml(s, t, nr) {
     const f = formyT(s, t), n = nr.verh && f ? bezForm(nr.verh, f) : nr.verh;
-    return (n ? `<p class="slv-note">${esc(n)}</p>` : '') + (f ? `<p class="slv-note slv-f4" lang="el">${f.slice(1).filter(Boolean).map(x => esc(x[0]).replace(/ /g, ' ')).join(' · ')}</p>` : '');
+    /* английский неправильный глагол — три формы той же плашкой, все три (go · went · gone): так их и учат */
+    if (s.f3) return (n ? `<p class="slv-note">${esc(n)}</p>` : '') + `<p class="slv-note slv-f4" lang="${LANG}">${s.f3.map(esc).join(' · ')}</p>`;
+    return (n ? `<p class="slv-note">${esc(n)}</p>` : '') + (f ?`<p class="slv-note slv-f4" lang="el">${f.slice(1).filter(Boolean).map(x => esc(x[0]).replace(/ /g, ' ')).join(' · ')}</p>` : '');
   }
   function zametkiHtml(s, t, nr) {
     const f = formyT(s, t), n = nr.ost && f ? bezForm(nr.ost, f) : nr.ost;
@@ -803,20 +849,22 @@
   }
   /* избранные слова — общие с Экмафиси (ключ ekmafisi.<id>.izbr, строки { l, s, b }, новые сверху); на сервер — настройкой izbr
      (EK.queueSettings, отправляет Экмафиси), чужие устройства приходят через Экмафиси (app.js, onRemote) */
-  const ikey = () => 'ekmafisi.' + ((window.EK && EK.uid) || 'anon') + '.izbr';
+  /* у английского — свой список: ekmafisi.<id>.izbr-en, настройка izbr-en (27.11.2026) */
+  const IZ = EL ? 'izbr' : 'izbr-' + LANG;
+  const ikey = () => 'ekmafisi.' + ((window.EK && EK.uid) || 'anon') + '.' + IZ;
   const izbr = () => readJ(ikey()) || [];
   function izbrSet(v) {
     try { localStorage.setItem(ikey(), JSON.stringify(v)); } catch (e) {}
-    const t = new Date().toISOString(), tk = ikey().replace(/izbr$/, 'settings.t'), T = readJ(tk) || {};  /* отметки времени настроек Экмафиси (app.js, TKEY) */
-    T.izbr = { v, t }; try { localStorage.setItem(tk, JSON.stringify(T)); } catch (e) {}
-    if (window.EK && EK.queueSettings && EK.uid) EK.queueSettings('izbr', v, t);
+    const t = new Date().toISOString(), tk = ikey().slice(0, -IZ.length) + 'settings.t', T = readJ(tk) || {};  /* отметки времени настроек Экмафиси (app.js, TKEY) */
+    T[IZ] = { v, t }; try { localStorage.setItem(tk, JSON.stringify(T)); } catch (e) {}
+    if (window.EK && EK.queueSettings && EK.uid) EK.queueSettings(IZ, v, t);
   }
   const STAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>';
   const starHtml = l => { const on = izbr().some(x => x.l === l), t = on ? 'Убрать из избранного' : 'В избранное';
     return `<button class="slv-star${on ? ' on' : ''}" aria-pressed="${on}" aria-label="${t}" data-tip="${t}">${STAR}</button>`; };
   const CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
   const FR = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="1.5" y="9" width="3" height="5.5" rx="1"/><rect x="6.5" y="5.5" width="3" height="9" rx="1"/><rect x="11.5" y="2" width="3" height="12.5" rx="1"/></svg>';
-  const POS = [['глагол', 'v'], ['сущ', 'n'], ['прил', 'a'], ['нареч', 'd'], ['местоим', 'p'], ['предлог', 'r'], ['союз', 'c'], ['частица', 'q'],
+  const POS = [['глагол', 'v'], ['гл.', 'v'], ['фраз', 'v'], ['сущ', 'n'], ['выраж', 'c'], ['идиом', 'c'], ['прил', 'a'], ['нареч', 'd'], ['местоим', 'p'], ['предлог', 'r'], ['союз', 'c'], ['частица', 'q'],
     ['числит', 'm'], ['порядк', 'm'], ['артикль', 't'], ['межд', 'i'], ['прич', 'pp']];
   const posC = p => (POS.find(([k]) => p.startsWith(k)) || [, ''])[1];
 
@@ -840,16 +888,20 @@
   }
   /* греческие слова — каждое в <span class="slv-w">: касание открывает статью (текст уже экранирован, греческие буквы esc не трогает) */
   const GRW = /[\u0370-\u03ff\u1f00-\u1fff]+/g;
-  const slova = t => esc(t).replace(GRW, w => `<span class="slv-w">${w}</span>`);
+  /* английское слово — с апострофом внутри (don't, I'm); «&amp;» и прочие замены esc — не слова */
+  const ENW = /&[a-z]+;|[A-Za-z]+(?:['’][A-Za-z]+)*/g;
+  const slova = t => EL ? esc(t).replace(GRW, w => `<span class="slv-w">${w}</span>`) : esc(t).replace(ENW, w => w[0] === '&' ? w : `<span class="slv-w">${w}</span>`);
   /* слово → лемма его статьи: точное совпадение по заголовку и всем формам, как в search(). Несколько — заголовок буква
      в букву с ударением («Ο» → ο, «θα» → θα), иначе самая частая (номера идут по частоте): «μου» → εγώ, не редкое μού */
   function slovoLemma(w) {
-    const c = D && exactAll('g', gr(w)); if (!c || !c.length) return null;
+    let c = D && exactAll('g', nrm(w));
+    if (D && !EL && !c.length) for (const x of raskryt(en(w)).split(' ')) { c = exactAll('g', x); if (c.length) break; }  /* don't → do, I'm → I */
+    if (!c || !c.length) return null;
     const lw = w.normalize('NFC').toLowerCase();
     for (const i of c) { const l = row(i).l; if (l.normalize('NFC').toLowerCase() === lw) return l; }
     return row(c.reduce((a, b) => rk(b) < rk(a) ? b : a)).l;
   }
-  const rowHtml = r => `<button data-l="${esc(r.l)}"><span class="w" lang="el">${esc(r.s)}</span><span class="t">${esc(r.b)}</span></button>`;
+  const rowHtml = r => `<button data-l="${esc(r.l)}"><span class="w" lang="${LANG}">${esc(r.s)}</span><span class="t">${esc(r.b)}</span></button>`;
   const rowOf = i => { const r = row(i); return { l: r.l, s: r.s, b: brief(r.z) }; };
   /* вид — сразу при загрузке модуля: статья о происхождении и строка «Происхождение ›» нужны Экмафиси и без экрана «Словарь» */
   const css = () => { if (!document.getElementById('slv-css')) { const st = document.createElement('style'); st.id = 'slv-css'; st.textContent = CSS; document.head.appendChild(st); } };
@@ -858,7 +910,7 @@
     css();
     /* поле без подсказок: нестандартное name/id, autocomplete/autocorrect выкл. — Chrome не подставляет прошлые вводы, клавиатура не правит */
     root.innerHTML = `<div class="slv${ANDROID ? ' android' : ''}${opts.dve ? ' dve' : ''}"><div class="slv-lev">
-      <div class="slv-row"><input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="Греческое или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other"></div>
+      <div class="slv-row"><input class="slv-q" type="search" name="slv-poisk-x" id="slv-poisk-${Math.random().toString(36).slice(2, 8)}" placeholder="${YAZ.im} или русское слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Поиск по словарю" data-lpignore="true" data-form-type="other"></div>
       <p class="slv-st"></p><div class="slv-bar hidden"><i></i></div>
       <div class="slv-list"></div></div>
       <article class="slv-art hidden"></article></div>`;
@@ -1051,7 +1103,7 @@
       const tab = m === 'tab' && s.tb;
       /* слово в заголовке (решение 25.11.2026): касание — словоформы (таблицы) и обратно к статье, долгое — происхождение.
          Значка таблиц нет; что слово нажимается, видно по тонкому пунктиру под ним (на экране таблиц — цветом и сплошной чертой) */
-      const h1 = `<h1 lang="el"${s.tb ? ` class="slv-tb1${tab ? ' on' : ''}" role="button" aria-label="${esc(s.s)} — ${tab ? 'к статье' : tbName(s).toLowerCase()}"` : ''}>${esc(s.s)}</h1>`;
+      const h1 = `<h1 lang="${LANG}"${s.tb ? ` class="slv-tb1${tab ? ' on' : ''}" role="button" aria-label="${esc(s.s)} — ${tab ? 'к статье' : tbName(s).toLowerCase()}"` : ''}>${esc(s.s)}</h1>`;
       /* переключатель залога Е/П (27.11.2026) — у глагола с двумя залогами, когда таблицы в памяти; буква — нынешний залог:
          в статье — первый в таблицах, на экране таблиц — показанный; нажатие — таблицы другого залога */
       const tz = s.tb && glagol(s) && D.ptr.tablicyN ? tbSync(l) : null, vs = zalogi(tz);
@@ -1071,17 +1123,17 @@
       mode = null;
       h += `
         <p class="slv-meta">${s.p ? `<span class="slv-pos" data-c="${posC(s.p)}">${esc(s.p)}</span>` : ''}${s.i ? `<span class="ipa">${esc(s.i)}</span>` : ''}${s.r ? `<span class="fr" title="место по частоте${s.v ? ' — вместе с ' + esc(s.v) : ''}">${FR}${num(s.r)}</span>` : ''}${starHtml(l)}</p>
-        ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="el" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}
-        ${(s.o || []).map(o => `<p class="slv-var">также форма${o.t ? ' ' + esc(o.t) : ''} от <button class="slv-link" lang="el" data-l="${esc(o.k)}">${esc(o.k)}</button></p>`).join('')}`;
+        ${s.v ? `<p class="slv-var">та же лексема: <button class="slv-link" lang="${LANG}" data-l="${esc(s.v)}">${esc(s.v)}</button></p>` : ''}
+        ${(s.o || []).map(o => `<p class="slv-var">также форма${o.t ? ' ' + esc(o.t) : ''} от <button class="slv-link" lang="${LANG}" data-l="${esc(o.k)}">${esc(o.k)}</button></p>`).join('')}`;
       const t0 = s.tb && glagol(s) && D.ptr.tablicyN ? tbSync(l) : null;  /* таблицы в памяти — формы сразу; нет — встанут, когда откроются */
       const nr = notaRazbor(s);
       h += `<div class="slv-nota">${notaHtml(s, t0, nr)}</div>`;
       h += '<ol class="slv-z">' + s.z.map((z, zi) => `<li><span class="ru">${z.lb ? `<span class="lb">${esc(z.lb)}</span>` : ''}${esc(z.ru)}</span>${z.ex ? '<ul class="slv-ex">' + z.ex.map((x, xi) =>
-        `<li><span class="e" lang="el">${slova(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
+        `<li><span class="e" lang="${LANG}">${slova(x.el)}</span><button class="slv-exsay" data-z="${zi}" data-x="${xi}" aria-label="Произнести пример">${SPK}</button>${SRC[x.src] ? `<span class="slv-src">${SRC[x.src]}</span>` : ''}<span class="r">${esc(x.ru)}</span></li>`).join('') + '</ul>' : ''}</li>`).join('') + '</ol>';
       const vyr = [...nr.vyr, ...(s.f || [])];  /* образцы из заметки — первыми */
-      if (vyr.length) h += '<h2>Выражения</h2><div class="slv-ph">' + vyr.map(x => `<div>${x.lb ? `<span class="lb">${esc(x.lb)}</span> ` : ''}<span class="e" lang="el">${slova(x.el)}</span>${x.ru ? ' — ' + esc(x.ru) : ''}</div>`).join('') + '</div>';
+      if (vyr.length) h += '<h2>Выражения</h2><div class="slv-ph">' + vyr.map(x => `<div>${x.lb ? `<span class="lb">${esc(x.lb)}</span> ` : ''}<span class="e" lang="${LANG}">${slova(x.el)}</span>${x.ru ? ' — ' + esc(x.ru) : ''}</div>`).join('') + '</div>';
       h += `<div class="slv-zamb">${zametkiHtml(s, t0, nr)}</div>`;
-      if (s.c && s.c.length && !s.tb) h += `<h2>Частые формы</h2><div class="slv-forms" lang="el">${s.c.map(esc).join(', ')}</div>`;
+      if (s.c && s.c.length && !s.tb) h += `<h2>${EL ? 'Частые формы' : 'Формы'}</h2><div class="slv-forms" lang="${LANG}">${s.c.map(esc).join(', ')}</div>`;
       const e0 = etimSync(l);  /* «Происхождение ›» с выжимкой; файл ещё открывается — строка встанет, когда откроется */
       h += `<div class="slv-ety">${e0 ? etimRow(l, e0) : ''}</div>`;
       if (side) {  /* статья слева, таблицы справа; таблицы ещё не в памяти — встанут, когда откроются */
@@ -1182,11 +1234,21 @@
     return api;
   }
 
+  /* статья по лемме для хозяина (карточка слова Экмафиси): est — есть ли (undefined — словарь ещё не открыт), statya — сама */
+  /* словаря языка нет (не выложен) или нет сети при первом открытии — статьи нет, и 5 минут сервер снова не спрашиваем */
+  let netDo = 0;
+  const est = l => D ? by(l) !== undefined : Date.now() < netDo ? false : undefined;
+  const statya = l => Date.now() < netDo ? Promise.resolve(null)
+    : load().then(() => { const i = by(l); return i === undefined ? null : stat(i); }, e => { netDo = Date.now() + 5 * 60e3; console.warn('slovar ' + LANG + ':', e.message || e); return null; });
   /* строка для настроек: «81 201 статья · ищется по-гречески, латиницей и по-русски»; словарь ни разу не открывался — '' */
   const opisanie = () => { let n = D ? D.ptr.n || D.n : 0; if (!n) try { n = +localStorage.getItem(STATEY) || 0; } catch (e) {}
-    return n ? `${num(n)} ${n % 10 === 1 && n % 100 !== 11 ? 'статья' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'статьи' : 'статей'} · ищется по-гречески, латиницей и по-русски` : ''; };
-  window.Slovar = { mount, load, opisanie, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true),
-    etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true), kratko, kratkoHtml,
+    return n ? `${num(n)} ${n % 10 === 1 && n % 100 !== 11 ? 'статья' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'статьи' : 'статей'} · ищется ${YAZ.po}` : ''; };
+  return { lang: LANG, mount, load, opisanie, search: q => (D ? search(q) : []), get data() { return D; }, zamer, proverit: () => proverit(true), est, statya,
+    etimLoad, etim, etimSync, etimHtml, etimRow, etimZapis, etimIstoriya, etimProverit: () => etimCheck(true),
+    kratko: EL ? kratko : () => Promise.resolve(''), kratkoHtml: EL ? kratkoHtml : () => '',
     /* сказать слово (карточка слова Экмафиси): артикль на выбор — один, как в статье; Azure по запросу (кэш) или голос телефона */
     skazat: (text, btn) => play(sayText(text), null, btn), SPK };
+};
+const yazyk = l => VSE[l] || (VSE[l] = sozdat(l));
+window.Slovar = Object.assign(yazyk('el'), { yazyk });
 })();

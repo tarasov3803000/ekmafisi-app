@@ -120,10 +120,10 @@
   };
   EK.chainState = (id, state) => DEV ? Promise.resolve() : sb.from('soberi_chains').update({ state }).eq('id', id).then(({ error }) => { if (error) throw error; });
   /* озвучка по запросу (функция golos): { url } — подписанная ссылка на mp3; без сети, в ?dev и при отказе — ошибка */
-  EK.golos = async (text) => {
+  EK.golos = async (text, lang) => {  /* lang — 'el' | 'en' (27.11.2026); старая функция без lang — греческий */
     if (DEV || !navigator.onLine) throw new Error('нет связи');
     if (EK.guest) throw new Error('только своим');
-    const { data, error } = await sb.functions.invoke('golos', { body: { text } });
+    const { data, error } = await sb.functions.invoke('golos', { body: lang && lang !== 'el' ? { text, lang } : { text } });
     if (error) throw error;
     return data;
   };
