@@ -447,10 +447,14 @@ const sozdat = LANG => {
     const u = new SpeechSynthesisUtterance(text); u.voice = v; u.lang = v.lang; u.rate = skorost();
     speechSynthesis.speak(u); return true;
   }
-  async function zaprosKey(text) {  /* тот же отпечаток считает функция golos (supabase/functions/golos) */
-    const b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(golosId() + '|' + text)));
+  async function zaprosKey(golos, text) {  /* тот же отпечаток считает функция golos (supabase/functions/golos) */
+    const b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(golos + '|' + text)));
     return [...b].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
   }
+  /* голоса озвучки по нажатию — те же папки, что смотрит функция golos (YAZ.est), лучший первым: el — ElevenLabs Matilda,
+     прежняя Azure Athina, Google Leda; en — Google Leda (28.11.2026) */
+  const ZGOLOSA = { el: ['matilda', 'athina', 'leda'], en: ['leda'] }[LANG] || [];
+  const zaprosPut = async (golos, text) => `${LANG}/zvuk-zapros/${golos}/${await zaprosKey(golos, text)}.mp3`;
   async function cached(k, get) {  /* из кэша звука; нет — get() из сети и в кэш */
     const c = await caches.open(ZCACHE);
     let r = await c.match(k);
@@ -465,10 +469,19 @@ const sozdat = LANG => {
   async function azureBlob(text, path) {
     if (path) { const b = await cached(ckey(path), () => EK.remote(path)); if (b) return b; }
     if (!window.EK || !EK.golos || !window.crypto || !crypto.subtle) return null;
-    const k = ckey(`${LANG}/zvuk-zapros/${golosId()}/${await zaprosKey(text)}.mp3`);
-    return cached(k, async () => fetch((await EK.golos(text, LANG)).url));  /* функция golos: lang — голос и папка языка */
+    /* уже скачанное — в кэше под голосом, которым озвучено: ищем по всем голосам языка, без запроса */
+    const c = await caches.open(ZCACHE);
+    for (const g of ZGOLOSA) { const r = await c.match(ckey(await zaprosPut(g, sayText(text)))); if (r) return r.blob(); }
+    if (!navigator.onLine) return null;
+    try {
+      const z = await EK.golos(text, LANG);  /* { url, golos }: голос — тот, что озвучил (ElevenLabs или Google) */
+      const p = z.golos ? await zaprosPut(z.golos, sayText(text)) : (decodeURIComponent(z.url).match(/\/content\/([^?]+\.mp3)/) || [])[1];
+      const r = await fetch(z.url);
+      if (!r.ok) return null;
+      if (p) await c.put(ckey(p), r.clone());  /* ключ — по голосу из ответа, не по своему: иначе голоса перепутаются */
+      return r.blob();
+    } catch (e) { console.warn('slovar: звук', e); return null; }
   }
-  const golosId = () => (D && D.golos) || YAZ.golos || 'athina';  /* словарь ещё не открыт (карточка слова Экмафиси) — голос по умолчанию */
   async function play(text, path, btn) {  /* text — что сказать; path — заранее озвученный файл в хранилище или null */
     if (audio) { audio.pause(); audio = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
